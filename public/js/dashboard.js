@@ -18,17 +18,24 @@ let todosLosPagos = [];
 function cargarPagos() {
     return __awaiter(this, void 0, void 0, function* () {
         const tabla = document.getElementById('tablaPagos');
-        tabla.innerHTML = '<tr><td colspan="5" class="p-10 text-center text-slate-400 animate-pulse font-bold uppercase text-[9px]">Sincronizando con base de datos...</td></tr>';
+        tabla.innerHTML = '<tr><td colspan="5" class="p-10 text-center text-slate-400 animate-pulse font-bold uppercase text-[9px]">Sincronizando...</td></tr>';
         try {
             const response = yield fetch('listar_pagos.php');
-            if (!response.ok)
-                throw new Error('Error en la API');
+
+            // Si el servidor responde 403, redirigimos al login
+            if (response.status === 403) {
+                window.location.href = 'login.html';
+                return;
+            }
+
+            if (!response.ok) throw new Error('Error en la API');
+
             todosLosPagos = yield response.json();
             renderizarTabla(todosLosPagos);
         }
         catch (error) {
             console.error(error);
-            tabla.innerHTML = '<tr><td colspan="5" class="p-10 text-center text-red-500 font-bold">Error al conectar con MongoDB</td></tr>';
+            tabla.innerHTML = '<tr><td colspan="5" class="p-10 text-center text-red-500 font-bold">Error de conexión</td></tr>';
         }
     });
 }
@@ -88,17 +95,27 @@ function renderizarTabla(pagosParaMostrar) {
  */
 function validarPago(id) {
     return __awaiter(this, void 0, void 0, function* () {
-        if (!confirm('¿Confirmas que este pago es legítimo?'))
-            return;
+        if (!confirm('¿Confirmas que este pago es legítimo?')) return;
         try {
             const response = yield fetch('aprobar_pago.php', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ id })
             });
+
+            // Control de acceso para la aprobación
+            if (response.status === 403) {
+                alert("Sesión expirada o sin permisos.");
+                window.location.href = 'login.html';
+                return;
+            }
+
             const result = yield response.json();
-            if (result.status === 'success')
+            if (result.status === 'success') {
                 yield cargarPagos();
+            } else {
+                alert("Error: " + (result.message || "No se pudo procesar"));
+            }
         }
         catch (error) {
             alert("Error de red.");

@@ -1,3 +1,7 @@
+<?php
+// Este archivo es público para los vecinos.
+// No incluimos lógica de redirección aquí para que el formulario se muestre siempre.
+?>
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -26,7 +30,6 @@
     </div>
 
     <form id="paymentForm" class="space-y-5">
-
         <div>
             <label class="block text-[10px] font-extrabold text-slate-500 uppercase mb-2 ml-1">Cédula del Propietario</label>
             <input type="text" name="cedula" placeholder="V-00000000" required
@@ -59,9 +62,6 @@
                 <div class="flex items-center justify-between mb-2 px-1">
                     <p class="text-[10px] font-extrabold text-slate-400 uppercase tracking-tighter">Vista previa del váucher</p>
                     <button type="button" id="removePreview" class="text-rose-500 hover:text-rose-700 text-[10px] font-bold flex items-center">
-                        <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-                        </svg>
                         REMOVER
                     </button>
                 </div>
@@ -74,13 +74,6 @@
         <div class="pt-4">
             <button type="submit" id="btnEnviar" class="group w-full bg-slate-900 text-white font-bold py-5 rounded-2xl hover:bg-blue-600 transform hover:-translate-y-1 shadow-2xl shadow-slate-200 transition-all active:scale-95 flex items-center justify-center">
                 <span id="btnText">ENVIAR DECLARACIÓN</span>
-                <svg id="spinner" class="hidden animate-spin h-5 w-5 text-white ml-3" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                </svg>
-                <svg id="successIcon" class="hidden h-5 w-5 text-white ml-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
-                </svg>
             </button>
         </div>
     </form>

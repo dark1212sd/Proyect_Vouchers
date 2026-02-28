@@ -1,4 +1,12 @@
 <?php
+
+session_start();
+if (!isset($_SESSION['role']) || $_SESSION['role'] !== 'admin') {
+    http_response_code(403);
+    echo json_encode(['status' => 'error', 'message' => 'No autorizado']);
+    exit();
+}
+
 header('Content-Type: application/json');
 require __DIR__ . '/config/db.php';
 
@@ -27,3 +35,6 @@ try {
 } catch (Exception $e) {
     echo json_encode(['status' => 'error', 'message' => $e->getMessage()]);
 }
+
+header('Content-Type: application/json');
+require __DIR__ . '/config/db.php';

@@ -1,4 +1,12 @@
 <?php
+session_start();
+// Si no hay sesión o no es admin, denegar acceso
+if (!isset($_SESSION['role']) || $_SESSION['role'] !== 'admin') {
+    http_response_code(403);
+    echo json_encode(['error' => 'No autorizado']);
+    exit();
+}
+
 header('Content-Type: application/json');
 require __DIR__ . '/config/db.php';
 
@@ -22,3 +30,4 @@ try {
 } catch (Exception $e) {
     echo json_encode(['error' => $e->getMessage()]);
 }
+
