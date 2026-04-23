@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Registro - Lanceros de la Victoria</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/animate.css/4.1.1/animate.min.css" rel="stylesheet">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;800&display=swap');
+        body { font-family: 'Plus Jakarta Sans', sans-serif; }
+    </style>
+</head>
+<body class="bg-slate-50 min-h-screen flex flex-col items-center justify-center p-4">
+
+<div class="animate__animated animate__fadeInUp bg-white p-10 rounded-[2.5rem] shadow-2xl w-full max-w-md border border-slate-100">
+
+    <div class="text-center mb-8">
+        <div class="inline-flex items-center justify-center w-16 h-16 bg-slate-900 rounded-2xl mb-4 shadow-lg shadow-slate-200">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z" />
+            </svg>
+        </div>
+        <h1 class="text-2xl font-extrabold text-slate-800 tracking-tight">Nuevo Registro</h1>
+        <p class="text-slate-400 text-xs font-semibold uppercase tracking-widest mt-2">Portal Vecinal</p>
+    </div>
+
+    <form action="procesar_registro.php" method="POST" class="space-y-4">
+        <div>
+            <label class="block text-[10px] font-extrabold text-slate-500 uppercase mb-2 ml-1">Nombre y Apellido</label>
+            <input type="text" name="nombre" placeholder="Ej: María Pérez" required
+                   class="w-full px-5 py-4 rounded-2xl bg-slate-50 border-none focus:ring-4 focus:ring-slate-200 focus:bg-white text-slate-700 font-semibold transition-all outline-none">
+        </div>
+
+        <div>
+            <label class="block text-[10px] font-extrabold text-slate-500 uppercase mb-2 ml-1">Cédula del Propietario</label>
+            <input type="text" name="cedula" placeholder="V-00000000" required
+                   class="w-full px-5 py-4 rounded-2xl bg-slate-50 border-none focus:ring-4 focus:ring-slate-200 focus:bg-white text-slate-700 font-semibold transition-all outline-none">
+        </div>
+
+        <div>
+            <label class="block text-[10px] font-extrabold text-slate-500 uppercase mb-2 ml-1">Nombre de Usuario</label>
+            <input type="text" name="username" placeholder="maria_perez" required
+                   class="w-full px-5 py-4 rounded-2xl bg-slate-50 border-none focus:ring-4 focus:ring-slate-200 focus:bg-white text-slate-700 font-semibold transition-all outline-none font-mono">
+        </div>
+
+        <div>
+            <label class="block text-[10px] font-extrabold text-slate-500 uppercase mb-2 ml-1">Crea una Contraseña</label>
+            <input type="password" name="password" placeholder="Mínimo 6 caracteres" required minlength="6"
+                   class="w-full px-5 py-4 rounded-2xl bg-slate-50 border-none focus:ring-4 focus:ring-slate-200 focus:bg-white text-slate-700 font-semibold transition-all outline-none">
+        </div>
+
+        <div class="pt-4">
+            <button type="submit" class="w-full bg-slate-900 text-white font-bold py-5 rounded-2xl hover:bg-blue-600 transform hover:-translate-y-1 shadow-xl shadow-slate-200 transition-all active:scale-95 flex items-center justify-center">
+                CREAR MI CUENTA
+            </button>
+        </div>
+    </form>
+
+    <div class="mt-8 text-center">
+        <p class="text-xs font-semibold text-slate-500">¿Ya tienes tu cuenta creada?</p>
+        <a href="login.html" class="text-slate-800 font-bold text-sm hover:underline mt-1 inline-block">Volver al Login</a>
+    </div>
+</div>
+
+</body>
+</html>

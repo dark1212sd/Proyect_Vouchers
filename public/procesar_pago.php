@@ -1,90 +1,93 @@
 <?php
-/**
- * API de Procesamiento de Pagos - Sistema Lanceros de la Victoria
- * Backend: PHP + MongoDB
- */
-
-// Seteamos el encabezado para que el navegador entienda que respondemos JSON
 header('Content-Type: application/json; charset=utf-8');
-
-// Requerimos la conexión a MongoDB (Asegúrate que la ruta sea correcta)
 require __DIR__ . '/config/db.php';
 
-// Inicializamos la respuesta por defecto
-$response = [
-    'status' => 'error',
-    'message' => 'Método no permitido'
-];
+$response = ['status' => 'error', 'message' => 'Método no permitido'];
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     try {
         // 1. Validar campos básicos
-        if (empty($_POST['cedula']) || empty($_POST['referencia']) || empty($_POST['monto'])) {
-            throw new Exception("Todos los campos son obligatorios.");
+        if (empty($_POST['cedula']) || empty($_POST['monto']) || empty($_POST['metodo_pago'])) {
+            throw new Exception("Datos incompletos.");
         }
 
         $cedula = htmlspecialchars($_POST['cedula']);
-        $referencia = htmlspecialchars($_POST['referencia']);
         $monto = floatval($_POST['monto']);
+        $metodo_pago = htmlspecialchars($_POST['metodo_pago']);
 
-        // 2. Validar y Procesar el Archivo (Soporte)
-        if (!isset($_FILES['comprobante']) || $_FILES['comprobante']['error'] !== UPLOAD_ERR_OK) {
-            throw new Exception("Error al subir el archivo de soporte.");
-        }
+        // Campos condicionales según el método
+        $referencia = (!empty($_POST['referencia'])) ? htmlspecialchars($_POST['referencia']) : 'N/A';
+        $divisa = $_POST['divisa'] ?? 'bs';
+        $plataforma = $_POST['plataforma'] ?? null;
 
-        $extensiones_permitidas = ['jpg', 'jpeg', 'png', 'pdf'];
-        $info_archivo = pathinfo($_FILES['comprobante']['name']);
-        $extension = strtolower($info_archivo['extension']);
+        $nombre_archivo = null;
+        $extension = null;
 
-        if (!in_array($extension, $extensiones_permitidas)) {
-            throw new Exception("Formato de archivo no permitido (Solo JPG, PNG o PDF).");
-        }
+        // 2. Procesar el Archivo (Soporte) - AHORA ES CONDICIONAL
+        if (isset($_FILES['comprobante']) && $_FILES['comprobante']['error'] === UPLOAD_ERR_OK) {
+            $extensiones_permitidas = ['jpg', 'jpeg', 'png', 'pdf'];
+            $info_archivo = pathinfo($_FILES['comprobante']['name']);
+            $extension = strtolower($info_archivo['extension']);
 
-        // Generar nombre único para evitar sobreescritura en Fedora
-        $nombre_archivo = time() . "_" . bin2hex(random_bytes(4)) . "." . $extension;
-        $carpeta_destino = "../uploads/vouchers/";
-        $ruta_final = $carpeta_destino . $nombre_archivo;
+            if (!in_array($extension, $extensiones_permitidas)) {
+                throw new Exception("Formato de archivo no permitido.");
+            }
 
-        // Crear carpeta si no existe (Seguridad en el filesystem)
-        if (!is_dir($carpeta_destino)) {
-            mkdir($carpeta_destino, 0755, true);
-        }
+            $nombre_archivo = time() . "_" . bin2hex(random_bytes(4)) . "." . $extension;
 
-        if (move_uploaded_file($_FILES['comprobante']['tmp_name'], $ruta_final)) {
+            // LA RUTA ESTÁ CORREGIDA AQUÍ CON SU PUNTO Y COMA
+            $carpeta_destino = __DIR__ . "/uploads/vouchers/";
 
-            // 3. Persistencia en MongoDB
-            $resultado = $db->vouchers->insertOne([
-                'referencia_bancaria' => $referencia,
-                'cedula_vecino' => $cedula,
-                'monto' => new MongoDB\BSON\Decimal128($monto),
-                'estatus' => 'pendiente',
-                'soporte_url' => $nombre_archivo, // Guardamos solo el nombre para mayor portabilidad
-                'fecha_declaracion' => new MongoDB\BSON\UTCDateTime(),
-                'metadatos' => [
-                    'extension' => $extension,
-                    'peso_kb' => round($_FILES['comprobante']['size'] / 1024, 2)
-                ]
-            ]);
+            if (!is_dir($carpeta_destino)) {
+                mkdir($carpeta_destino, 0755, true);
+            }
 
-            // 4. Respuesta Exitosa
-            $response = [
-                'status' => 'success',
-                'message' => '¡Declaración recibida con éxito!',
-                'id' => (string)$resultado->getInsertedId()
-            ];
-
+            if (!move_uploaded_file($_FILES['comprobante']['tmp_name'], $carpeta_destino . $nombre_archivo)) {
+                throw new Exception("No se pudo guardar la imagen.");
+            }
         } else {
-            throw new Exception("No se pudo mover el archivo al directorio de destino.");
+            // Si no subió archivo y NO es efectivo, dar error.
+            if ($metodo_pago !== 'efectivo') {
+                throw new Exception("El comprobante de pago es obligatorio para este método.");
+            }
         }
 
-    } catch (MongoDB\Driver\Exception\BulkWriteException $e) {
-        // Manejo específico para el índice único de la referencia bancaria
-        $response = [
-            'status' => 'error',
-            'message' => 'El número de referencia bancaria ya existe en nuestro sistema.'
+        // 3. Construir el documento a guardar en MongoDB
+        $documento = [
+            'cedula_vecino' => $cedula,
+            'monto' => new MongoDB\BSON\Decimal128($monto),
+            'metodo_pago' => $metodo_pago,
+            'referencia_bancaria' => $referencia,
+            'estatus' => 'pendiente',
+            'fecha_declaracion' => new MongoDB\BSON\UTCDateTime()
         ];
+
+        // Añadir campos dinámicos
+        if ($metodo_pago === 'efectivo') {
+            $documento['divisa'] = $divisa;
+        } elseif ($metodo_pago === 'electronico') {
+            $documento['plataforma'] = $plataforma;
+        }
+
+        // Guardar soporte si existe
+        if ($nombre_archivo) {
+            $documento['soporte_url'] = $nombre_archivo;
+            $documento['metadatos'] = [
+                'extension' => $extension,
+                'peso_kb' => round($_FILES['comprobante']['size'] / 1024, 2)
+            ];
+        }
+
+        // 4. Inserción en la BD
+        $resultado = $db->vouchers->insertOne($documento);
+
+        $response = [
+            'status' => 'success',
+            'message' => '¡Declaración recibida con éxito!',
+            'id' => (string)$resultado->getInsertedId()
+        ];
+
     } catch (Exception $e) {
-        // Manejo de errores generales
         $response = [
             'status' => 'error',
             'message' => $e->getMessage()
@@ -92,5 +95,5 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-// Retornamos la respuesta JSON final
 echo json_encode($response);
+?>
