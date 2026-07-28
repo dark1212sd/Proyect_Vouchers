@@ -2,10 +2,23 @@
 // public/auth/login.php
 session_start();
 
+if (isset($_SESSION['user_id'])) {
+    header('Location: ../public/user_panel.php');
+    exit();
+}
+
 // Activamos reporte de errores para desarrollo
 ini_set('display_errors', 1);
 ini_set('display_startup_errors', 1);
 error_reporting(E_ALL);
+
+// 1. GUARDAMOS EL CAPTCHA ANTERIOR ANTES DE GENERAR EL NUEVO
+// (Vital para que el POST compare con el número que el usuario vio en pantalla)
+$captcha_esperado = $_SESSION['captcha_res'] ?? -1;
+
+$num1 = rand(2, 9);
+$num2 = rand(1, 8);
+$_SESSION['captcha_res'] = $num1 + $num2;
 
 // Si ya tiene sesión activa, redirigir a su panel correspondiente
 if (isset($_SESSION['role']) || isset($_SESSION['rol']) || isset($_SESSION['user_id'])) {
@@ -21,32 +34,72 @@ $error = "";
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     require_once __DIR__ . '/../config/db.php';
 
-    $username = trim($_POST['username'] ?? '');
-    $password = $_POST['password'] ?? '';
+    $username       = trim($_POST['username'] ?? '');
+    $password       = $_POST['password'] ?? '';
+    $captchaUsuario = intval(trim($_POST['captcha'] ?? 0));
 
-    if (!empty($username) && !empty($password)) {
+    if (!empty($username) && !empty($password) && !empty($captchaUsuario)) {
         try {
-            // Consulta NoSQL a MongoDB en la colección 'usuarios'
-            $usuario = $db->usuarios->findOne(['username' => $username]);
-
-            // Verificamos si existe el usuario y si la contraseña coincide con el hash
-            if ($usuario && password_verify($password, $usuario['password'])) {
-                $_SESSION['user_id']  = (string)$usuario['_id'];
-                $_SESSION['username'] = $usuario['username'];
-                $_SESSION['role']     = $usuario['role'] ?? 'user';
-                $_SESSION['nombre']   = $usuario['nombre'] ?? $username;
-
-                $rol = $_SESSION['role'];
-                if ($rol === 'superuser') {
-                    header("Location: /super_dashboard.php");
-                } elseif ($rol === 'admin') {
-                    header("Location: /dashboard.php");
-                } else {
-                    header("Location: /user_panel.php");
-                }
-                exit();
+            // A. VALIDAR CAPTCHA PRIMERO (Ahorra recursos si es un bot)
+            if ($captchaUsuario !== intval($captcha_esperado) || $captcha_esperado === -1) {
+                $error = "Desafío antibots incorrecto. La suma matemática no coincide.";
             } else {
-                $error = "Credenciales incorrectas. Verifica tu usuario y contraseña.";
+                // B. CONSULTA NOSQL A MONGODB
+                $usuario = $db->usuarios->findOne(['username' => $username]);
+
+                if (!$usuario) {
+                    $error = "Credenciales incorrectas. Verifica tu usuario y contraseña.";
+                } else {
+                    // C. VERIFICAR BLOQUEO TEMPORAL (Fuerza Bruta)
+                    $ahora = new MongoDB\BSON\UTCDateTime();
+                    if (isset($usuario['bloqueado_hasta']) && $usuario['bloqueado_hasta'] > $ahora) {
+                        $tiempoRestanteMs = $usuario['bloqueado_hasta']->toDateTime()->getTimestamp() - time();
+                        $minutos = ceil($tiempoRestanteMs / 60);
+                        $error = "🔒 Cuenta bloqueada temporalmente por seguridad tras 3 intentos fallidos. Podrás reintentar en {$minutos} minuto(s).";
+                    } else {
+                        // D. VERIFICAR CONTRASEÑA
+                        if (password_verify($password, $usuario['password'])) {
+
+                            // LIMPIAR INTENTOS Y BLOQUEOS EN MONGODB AL TENER ÉXITO
+                            $db->usuarios->updateOne(
+                                    ['_id' => $usuario['_id']],
+                                    ['$unset' => ['intentos_fallidos' => '', 'bloqueado_hasta' => '']]
+                            );
+
+                            $_SESSION['user_id']  = (string)$usuario['_id'];
+                            $_SESSION['username'] = $usuario['username'];
+                            $_SESSION['role']     = $usuario['role'] ?? 'user';
+                            $_SESSION['nombre']   = $usuario['nombre'] ?? $username;
+
+                            $rol = $_SESSION['role'];
+                            if ($rol === 'superuser') {
+                                header("Location: /super_dashboard.php");
+                            } elseif ($rol === 'admin') {
+                                header("Location: /dashboard.php");
+                            } else {
+                                header("Location: /user_panel.php");
+                            }
+                            exit();
+
+                        } else {
+                            // SI LA CLAVE ES INCORRECTA: Aumentar contador de fallos
+                            $intentos = intval($usuario['intentos_fallidos'] ?? 0) + 1;
+                            $maxIntentos = 3;
+
+                            $datosActualizar = ['$set' => ['intentos_fallidos' => $intentos]];
+                            $error = "Contraseña incorrecta. Te quedan " . ($maxIntentos - $intentos) . " intento(s) antes del bloqueo.";
+
+                            // Si llegó a 3 fallos, bloqueamos por 5 minutos (300 segundos)
+                            if ($intentos >= $maxIntentos) {
+                                $tiempoBloqueo = new MongoDB\BSON\UTCDateTime((time() + 300) * 1000);
+                                $datosActualizar['$set']['bloqueado_hasta'] = $tiempoBloqueo;
+                                $error = "🚨 Has superado el límite de 3 intentos fallidos. Tu cuenta ha sido bloqueada por 5 minutos.";
+                            }
+
+                            $db->usuarios->updateOne(['_id' => $usuario['_id']], $datosActualizar);
+                        }
+                    }
+                }
             }
         } catch (Exception $e) {
             $error = "Error de conexión con MongoDB: " . $e->getMessage();
@@ -255,6 +308,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         <button type="button" id="togglePassword" class="absolute inset-y-0 right-0 pr-4 flex items-center text-slate-500 hover:text-cyan-400 transition-colors">
                             <i data-lucide="eye" id="eyeIcon" class="w-5 h-5"></i>
                         </button>
+                    </div>
+                </div>
+
+                <!-- CAMPO DE CAPTCHA MATEMÁTICO ADAPTADO A TU ESTÉTICA -->
+                <div>
+                    <label class="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-2" for="captcha">
+                        Desafío Antibots (CAPTCHA)
+                    </label>
+                    <div class="flex items-center gap-3">
+                        <div class="flex-1 py-3.5 px-4 bg-slate-900 border border-slate-800 rounded-xl font-mono font-black text-sm text-center text-cyan-400 select-none shadow-inner tracking-wider">
+                            ¿Cuánto es <?php echo $num1; ?> + <?php echo $num2; ?>?
+                        </div>
+                        <div class="relative w-32">
+                            <div class="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-500">
+                                <i data-lucide="shield-check" class="w-4 h-4"></i>
+                            </div>
+                            <input
+                                    type="number"
+                                    id="captcha"
+                                    name="captcha"
+                                    required
+                                    placeholder="?"
+                                    class="w-full pl-10 pr-3 py-3.5 bg-slate-900 border border-slate-800 rounded-xl text-white text-sm font-black text-center focus:outline-none focus:border-cyan-400 glow-input transition-all placeholder-slate-600"
+                            >
+                        </div>
                     </div>
                 </div>
 
