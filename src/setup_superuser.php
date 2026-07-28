@@ -1,6 +1,6 @@
 <?php
 // Usamos la configuración de base de datos existente
-require __DIR__ . '/../public/config/db.php';
+require_once __DIR__ . '/../public/config/db.php';
 
 $superData = [
     'username' => 'Leo_su',

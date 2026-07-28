@@ -1,171 +1,251 @@
 <?php
+// public/admin_vecinos.php
 session_start();
-require __DIR__ . '/config/db.php';
+ini_set('display_errors', 1);
+error_reporting(E_ALL);
 
-// Protección: Solo Admin o Superuser pueden entrar
-if (!isset($_SESSION['role']) || ($_SESSION['role'] !== 'admin' && $_SESSION['role'] !== 'superuser')) {
-    header("Location: auth/login.html");
+// Protección de sesión
+if (!isset($_SESSION['user_id']) || !in_array($_SESSION['role'] ?? '', ['admin', 'superuser'])) {
+    header("Location: /auth/login.php");
     exit();
 }
 
-// Procesar la edición del vecino
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['editar_vecino'])) {
-    $id_vecino = new MongoDB\BSON\ObjectId($_POST['id_vecino']);
+require_once __DIR__ . '/config/db.php';
 
-    $updateData = [
-        'nombre' => $_POST['nombre'],
-        'dia_cobro' => (int)$_POST['dia_cobro']
+// Búsqueda de usuarios (Filtro en tiempo real)
+$filtro = $_GET['buscar'] ?? '';
+$condicion = [];
+if (!empty($filtro)) {
+    $condicion['$or'] = [
+            ['nombre' => new MongoDB\BSON\Regex($filtro, 'i')],
+            ['cedula' => new MongoDB\BSON\Regex($filtro, 'i')],
+            ['apartamento' => new MongoDB\BSON\Regex($filtro, 'i')],
+            ['email' => new MongoDB\BSON\Regex($filtro, 'i')]
     ];
-
-    // Si escribió una contraseña nueva, la actualizamos
-    if (!empty($_POST['nueva_password'])) {
-        $updateData['password'] = password_hash($_POST['nueva_password'], PASSWORD_DEFAULT);
-    }
-
-    try {
-        $db->usuarios->updateOne(['_id' => $id_vecino], ['$set' => $updateData]);
-        $mensaje = "✅ Datos del vecino actualizados correctamente.";
-    } catch (Exception $e) {
-        $error = "❌ Error al actualizar.";
-    }
 }
 
-// Obtener todos los usuarios que son vecinos
-$vecinos = $db->usuarios->find(['role' => 'vecino'], ['sort' => ['nombre' => 1]]);
-$total_v = $db->usuarios->countDocuments(['role' => 'vecino']);
+// Obtenemos los usuarios ordenados alfabéticamente
+$usuarios = iterator_to_array($db->usuarios->find($condicion, ['sort' => ['nombre' => 1]]));
 ?>
-
 <!DOCTYPE html>
-<html lang="es">
+<html lang="es" class="dark">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Gestión de Vecinos - Lanceros</title>
+    <title>Gestión de Vecinos - Admin</title>
+
+    <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/animate.css/4.1.1/animate.min.css" rel="stylesheet">
+
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        neon: { cyan: '#00f2fe', emerald: '#10b981', amber: '#f59e0b' }
+                    }
+                }
+            }
+        }
+    </script>
+
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;800&display=swap');
-        body { font-family: 'Plus Jakarta Sans', sans-serif; }
+        .glow-cyan { box-shadow: 0 0 25px -5px rgba(0, 242, 254, 0.3); }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        @keyframes fadeIn { from { opacity: 0; transform: scale(0.95); } to { opacity: 1; transform: scale(1); } }
+        .animate-modal { animation: fadeIn 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
     </style>
 </head>
-<body class="bg-slate-50 min-h-screen relative">
+<body class="bg-slate-950 text-slate-100 font-sans min-h-screen flex flex-col selection:bg-cyan-500 selection:text-slate-950">
 
-<nav class="bg-slate-900 text-white p-4 shadow-xl sticky top-0 z-40">
-    <div class="max-w-7xl mx-auto flex justify-between items-center">
-        <div class="flex items-center gap-3">
-            <a href="dashboard.php" class="bg-blue-600 p-2 rounded-lg font-black text-white italic text-xl">L</a>
-            <span class="font-extrabold tracking-tighter text-lg uppercase">Panel <span class="text-blue-500">Admin</span></span>
+<!-- HEADER ADMIN -->
+<header class="bg-slate-900/90 border-b border-slate-800/80 backdrop-blur-md sticky top-0 z-40">
+    <div class="max-w-[90rem] mx-auto px-4 sm:px-6 lg:px-8 h-20 flex items-center justify-between">
+        <div class="flex items-center space-x-4">
+            <a href="/dashboard.php" class="p-2 rounded-xl bg-slate-800 text-slate-400 hover:text-cyan-400 transition-colors" title="Volver al Dashboard">
+                <i data-lucide="arrow-left" class="w-5 h-5"></i>
+            </a>
+            <div>
+                <span class="text-lg font-black tracking-tight text-white block leading-none">GESTIÓN<span class="text-cyan-400">VECINAL</span></span>
+                <span class="text-[10px] font-bold text-slate-500 tracking-widest uppercase block mt-0.5">Directorio de Residentes</span>
+            </div>
         </div>
-        <div class="flex items-center gap-6 text-[10px] font-black uppercase tracking-widest">
-            <a href="dashboard.php" class="hover:text-blue-400 transition-colors">Volver al Inicio</a>
+        <div class="hidden sm:flex items-center gap-2">
+                <span class="px-3 py-1 rounded-full bg-slate-800 border border-slate-700 text-xs font-bold text-slate-300">
+                    Total: <span class="text-cyan-400"><?php echo count($usuarios); ?></span>
+                </span>
         </div>
     </div>
-</nav>
+</header>
 
-<div class="max-w-7xl mx-auto p-6 md:p-10">
-    <header class="mb-10 flex justify-between items-end">
-        <div>
-            <h1 class="text-3xl font-black text-slate-800 tracking-tight">Directorio de Vecinos</h1>
-            <p class="text-slate-400 text-xs font-bold uppercase mt-1">Total registrados: <?php echo $total_v; ?></p>
-        </div>
-        <?php if(isset($mensaje)) echo "<span class='text-xs font-bold text-emerald-500 bg-emerald-50 px-4 py-2 rounded-xl animate-pulse border border-emerald-200'>$mensaje</span>"; ?>
-    </header>
+<!-- CONTENIDO PRINCIPAL -->
+<main class="max-w-[90rem] mx-auto px-4 sm:px-6 lg:px-8 py-8 flex-grow w-full">
 
-    <div class="bg-white rounded-[2.5rem] shadow-xl overflow-hidden border border-slate-100 animate__animated animate__fadeInUp">
-        <table class="w-full text-left">
-            <thead class="bg-slate-50 border-b border-slate-100">
-                <tr>
-                    <th class="p-6 text-[9px] font-black text-slate-400 uppercase tracking-widest">Cédula</th>
-                    <th class="p-6 text-[9px] font-black text-slate-400 uppercase tracking-widest">Nombre Completo</th>
-                    <th class="p-6 text-[9px] font-black text-slate-400 uppercase tracking-widest text-center">Día de Cobro</th>
-                    <th class="p-6 text-[9px] font-black text-slate-400 uppercase tracking-widest text-center">Acciones</th>
-                </tr>
-            </thead>
-            <tbody class="divide-y divide-slate-50 text-sm">
-                <?php foreach ($vecinos as $v): ?>
-                <tr class="hover:bg-slate-50 transition-all">
-                    <td class="p-6 font-bold text-slate-700"><?php echo htmlspecialchars($v['cedula']); ?></td>
-                    <td class="p-6 text-slate-600 font-semibold">
-                        <?php echo htmlspecialchars($v['nombre'] ?? 'Sin nombre'); ?>
-                        <p class="text-[10px] text-slate-400 font-mono mt-1">Usuario: <?php echo htmlspecialchars($v['username']); ?></p>
-                    </td>
-                    <td class="p-6 text-center font-black text-blue-600 text-lg">
-                        <?php echo htmlspecialchars($v['dia_cobro'] ?? '5'); ?>
-                    </td>
-                    <td class="p-6 flex justify-center gap-2">
-                        <button onclick="abrirModal('<?php echo (string)$v['_id']; ?>', '<?php echo addslashes($v['nombre']); ?>', '<?php echo $v['dia_cobro'] ?? '5'; ?>')"
-                                class="bg-slate-100 text-slate-600 px-4 py-2 rounded-xl text-[10px] font-black uppercase hover:bg-slate-800 hover:text-white transition-all border border-slate-200">
-                            Ajustes
-                        </button>
-                        <button onclick="window.location.href='dashboard.php?buscar=<?php echo htmlspecialchars($v['cedula']); ?>'"
-                                class="bg-blue-100 text-blue-600 px-4 py-2 rounded-xl text-[10px] font-black uppercase hover:bg-blue-600 hover:text-white transition-all border border-blue-200">
-                            Ver Pagos
-                        </button>
-                    </td>
-                </tr>
-                <?php endforeach; ?>
-            </tbody>
-        </table>
+    <!-- BARRA DE HERRAMIENTAS -->
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4 mb-6 flex flex-col sm:flex-row justify-between items-center gap-4 shadow-lg">
+        <!-- Buscador -->
+        <form action="" method="GET" class="w-full sm:w-auto flex gap-2">
+            <div class="relative w-full sm:w-80">
+                <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-500"><i data-lucide="search" class="w-4 h-4"></i></div>
+                <input type="text" name="buscar" value="<?php echo htmlspecialchars($filtro); ?>" placeholder="Buscar por nombre, cédula, correo o apto..." class="w-full pl-9 pr-3 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-white text-xs focus:outline-none focus:border-cyan-400 transition-all">
+            </div>
+            <button type="submit" class="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-bold transition-all">Buscar</button>
+            <?php if(!empty($filtro)): ?>
+                <a href="/admin_vecinos.php" class="px-3 py-2.5 bg-rose-500/10 text-rose-400 rounded-xl border border-rose-500/20 hover:bg-rose-500 hover:text-white transition-all"><i data-lucide="x" class="w-4 h-4"></i></a>
+            <?php endif; ?>
+        </form>
+
+        <!-- Botón Registrar -->
+        <button onclick="document.getElementById('modalNuevoVecino').classList.remove('hidden')" class="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-gradient-to-r from-cyan-500 to-emerald-400 text-slate-950 font-extrabold text-xs glow-cyan hover:scale-[1.02] transition-all flex items-center justify-center gap-2 shadow-lg">
+            <i data-lucide="user-plus" class="w-4 h-4 stroke-[2.5]"></i>
+            <span>Registrar Residente</span>
+        </button>
     </div>
-</div>
 
-<div id="editModal" class="hidden fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate__animated animate__fadeIn animate__faster">
-    <div class="bg-white rounded-[2.5rem] shadow-2xl w-full max-w-md border border-slate-100 overflow-hidden transform scale-95 transition-transform duration-300" id="modalContent">
-        <div class="p-8">
-            <div class="flex justify-between items-center mb-6">
-                <h3 class="text-xl font-black text-slate-800">Ajustes del Vecino</h3>
-                <button onclick="cerrarModal()" class="text-slate-400 hover:text-rose-500 font-bold text-xl">&times;</button>
+    <!-- TABLA DE VECINOS -->
+    <div class="bg-slate-900/80 border border-slate-800 rounded-3xl p-6 shadow-xl overflow-hidden">
+        <div class="overflow-x-auto no-scrollbar">
+            <table class="w-full text-left border-collapse whitespace-nowrap">
+                <thead>
+                <tr class="border-b border-slate-800 text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                    <th class="py-3 px-4">Residente</th>
+                    <th class="py-3 px-4">Contacto (Email / Tel)</th>
+                    <th class="py-3 px-4">Cédula</th>
+                    <th class="py-3 px-4">Ubicación</th>
+                    <th class="py-3 px-4">Rol en Sistema</th>
+                    <th class="py-3 px-4 text-right">Acciones</th>
+                </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-800/60 text-xs text-slate-300">
+                <?php if(count($usuarios) > 0): ?>
+                    <?php foreach ($usuarios as $usr):
+                        $rol = $usr['role'] ?? 'user';
+                        $badgeRol = ($rol === 'admin' || $rol === 'superuser') ? 'bg-amber-500/10 text-amber-400 border-amber-500/20' : 'bg-cyan-500/10 text-cyan-400 border-cyan-500/20';
+                        $textoRol = ($rol === 'admin') ? 'Tesorero' : (($rol === 'superuser') ? 'Súper Admin' : 'Vecino');
+                        ?>
+                        <tr class="hover:bg-slate-800/40 transition-colors">
+                            <td class="py-3.5 px-4 font-bold text-white flex items-center gap-3">
+                                <?php if(!empty($usr['avatar'])): ?>
+                                    <img src="<?php echo htmlspecialchars($usr['avatar']); ?>" class="w-8 h-8 rounded-full object-cover border border-slate-700">
+                                <?php else: ?>
+                                    <div class="w-8 h-8 rounded-full bg-slate-800 flex items-center justify-center text-slate-500"><i data-lucide="user" class="w-4 h-4"></i></div>
+                                <?php endif; ?>
+                                <div class="flex flex-col">
+                                    <span><?php echo htmlspecialchars($usr['nombre'] ?? $usr['username']); ?></span>
+                                    <span class="text-[9px] text-slate-500 font-normal">@<?php echo htmlspecialchars($usr['username'] ?? 'N/A'); ?></span>
+                                </div>
+                            </td>
+                            <td class="py-3.5 px-4">
+                                <span class="block text-cyan-400 font-mono text-[10px]"><?php echo htmlspecialchars($usr['email'] ?? 'Sin correo'); ?></span>
+                                <span class="block text-slate-400 mt-0.5"><?php echo htmlspecialchars($usr['telefono'] ?? 'Sin teléfono'); ?></span>
+                            </td>
+                            <td class="py-3.5 px-4 font-mono text-slate-400"><?php echo htmlspecialchars($usr['cedula'] ?? 'S/R'); ?></td>
+                            <td class="py-3.5 px-4">
+                                <span class="font-bold text-emerald-400 block"><?php echo htmlspecialchars($usr['apartamento'] ?? 'N/A'); ?></span>
+                                <span class="text-[10px] text-slate-500 block"><?php echo htmlspecialchars($usr['torre'] ?? 'Sin Torre'); ?></span>
+                            </td>
+                            <td class="py-3.5 px-4">
+                                <span class="px-2 py-1 rounded-md text-[9px] font-black uppercase tracking-widest border <?php echo $badgeRol; ?>"><?php echo $textoRol; ?></span>
+                            </td>
+                            <td class="py-3.5 px-4 text-right">
+                                <button class="p-1.5 rounded-lg bg-slate-800 hover:bg-cyan-500 hover:text-slate-950 transition-colors inline-block shadow" title="Editar Perfil"><i data-lucide="edit" class="w-4 h-4"></i></button>
+                                <button class="p-1.5 rounded-lg bg-slate-800 hover:bg-rose-500 hover:text-white transition-colors inline-block ml-1 shadow" title="Suspender Usuario"><i data-lucide="ban" class="w-4 h-4"></i></button>
+                            </td>
+                        </tr>
+                    <?php endforeach; ?>
+                <?php else: ?>
+                    <tr>
+                        <td colspan="6" class="py-8 text-center text-slate-500">
+                            <i data-lucide="users" class="w-8 h-8 mx-auto mb-2 opacity-50"></i>
+                            No se encontraron residentes con ese criterio de búsqueda.
+                        </td>
+                    </tr>
+                <?php endif; ?>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</main>
+
+<!-- ==========================================
+     MODAL: REGISTRAR NUEVO VECINO (Actualizado)
+     ========================================== -->
+<div id="modalNuevoVecino" class="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 hidden">
+    <div class="bg-slate-900 border border-slate-800 rounded-3xl max-w-md w-full p-6 sm:p-8 relative overflow-hidden shadow-2xl animate-modal">
+        <div class="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-cyan-500 to-emerald-400"></div>
+
+        <div class="flex items-center justify-between mb-6">
+            <h3 class="text-lg font-black text-white flex items-center gap-2">
+                <i data-lucide="user-plus" class="w-5 h-5 text-cyan-400"></i>
+                Nuevo Residente
+            </h3>
+            <button onclick="document.getElementById('modalNuevoVecino').classList.add('hidden')" class="text-slate-500 hover:text-white transition-colors">
+                <i data-lucide="x" class="w-5 h-5"></i>
+            </button>
+        </div>
+
+        <!-- Formulario conectado a procesar_registro.php -->
+        <form action="/auth/procesar_registro.php" method="POST" class="space-y-4 text-xs">
+
+            <div>
+                <label class="block font-bold text-slate-400 mb-1.5">Nombre Completo</label>
+                <input type="text" name="nombre" required placeholder="Ej: Emerson Rodríguez" class="w-full px-3 py-3 bg-slate-950 border border-slate-800 rounded-xl text-white focus:border-cyan-400 focus:outline-none transition-colors">
             </div>
 
-            <form action="" method="POST" class="space-y-5">
-                <input type="hidden" name="id_vecino" id="modal_id">
-
+            <div class="grid grid-cols-2 gap-3">
                 <div>
-                    <label class="block text-[10px] font-extrabold text-slate-500 uppercase mb-2 ml-1">Nombre Completo</label>
-                    <input type="text" name="nombre" id="modal_nombre" required
-                           class="w-full px-5 py-4 rounded-2xl bg-slate-50 border-none focus:ring-4 focus:ring-blue-100 text-slate-700 font-semibold outline-none">
+                    <label class="block font-bold text-slate-400 mb-1.5">Cédula</label>
+                    <input type="text" name="cedula" required placeholder="Ej: V-28192031" class="w-full px-3 py-3 bg-slate-950 border border-slate-800 rounded-xl text-white focus:border-cyan-400 focus:outline-none transition-colors">
                 </div>
-
                 <div>
-                    <label class="block text-[10px] font-extrabold text-slate-500 uppercase mb-2 ml-1">Día de Cobro (1 al 31)</label>
-                    <input type="number" min="1" max="31" name="dia_cobro" id="modal_dia" required
-                           class="w-full px-5 py-4 rounded-2xl bg-slate-50 border-none focus:ring-4 focus:ring-blue-100 text-blue-600 font-black outline-none">
+                    <label class="block font-bold text-slate-400 mb-1.5">Apto. Asignado</label>
+                    <input type="text" name="apartamento" placeholder="Ej: 4-B" class="w-full px-3 py-3 bg-slate-950 border border-slate-800 rounded-xl text-white focus:border-cyan-400 focus:outline-none transition-colors">
                 </div>
+            </div>
 
-                <div class="bg-rose-50 p-5 rounded-2xl border border-rose-100 mt-4">
-                    <label class="block text-[10px] font-extrabold text-rose-600 uppercase mb-2">Restablecer Contraseña (Opcional)</label>
-                    <input type="password" name="nueva_password" placeholder="Dejar en blanco para no cambiar" minlength="6"
-                           class="w-full px-5 py-3 rounded-xl bg-white border-none focus:ring-4 focus:ring-rose-200 text-slate-700 font-semibold outline-none text-sm">
-                </div>
+            <!-- NUEVO CAMPO: CORREO ELECTRÓNICO OBLIGATORIO -->
+            <div>
+                <label class="block font-bold text-slate-400 mb-1.5">Correo Electrónico <span class="text-rose-400">*</span></label>
+                <input type="email" name="email" required placeholder="Para envío de recibos digitales" class="w-full px-3 py-3 bg-slate-950 border border-slate-800 rounded-xl text-white font-bold text-cyan-400 focus:border-cyan-400 focus:outline-none transition-colors">
+            </div>
 
-                <div class="pt-4">
-                    <button type="submit" name="editar_vecino" class="w-full bg-slate-900 text-white font-bold py-4 rounded-2xl hover:bg-blue-600 transition-all shadow-xl">
-                        GUARDAR CAMBIOS
-                    </button>
+            <div class="grid grid-cols-2 gap-3">
+                <div>
+                    <label class="block font-bold text-slate-400 mb-1.5">Usuario de Login</label>
+                    <input type="text" name="username" required placeholder="Ej: emerson_r" class="w-full px-3 py-3 bg-slate-950 border border-slate-800 rounded-xl text-white focus:border-cyan-400 focus:outline-none transition-colors">
                 </div>
-            </form>
-        </div>
+                <div>
+                    <label class="block font-bold text-slate-400 mb-1.5">Contraseña</label>
+                    <input type="password" name="password" required placeholder="Clave temporal" class="w-full px-3 py-3 bg-slate-950 border border-slate-800 rounded-xl text-white focus:border-cyan-400 focus:outline-none transition-colors">
+                </div>
+            </div>
+
+            <div class="pt-4 flex gap-3">
+                <button type="button" onclick="document.getElementById('modalNuevoVecino').classList.add('hidden')" class="w-1/2 py-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold transition-colors">Cancelar</button>
+                <button type="submit" class="w-1/2 py-3 rounded-xl bg-gradient-to-r from-cyan-500 to-emerald-400 hover:opacity-90 text-slate-950 font-extrabold transition-opacity flex items-center justify-center gap-1.5 glow-cyan">
+                    <i data-lucide="save" class="w-4 h-4"></i> Guardar
+                </button>
+            </div>
+        </form>
     </div>
 </div>
 
+<!-- SCRIPTS -->
 <script>
-    function abrirModal(id, nombre, dia) {
-        document.getElementById('modal_id').value = id;
-        document.getElementById('modal_nombre').value = nombre;
-        document.getElementById('modal_dia').value = dia;
+    lucide.createIcons();
 
-        const modal = document.getElementById('editModal');
-        const content = document.getElementById('modalContent');
-        modal.classList.remove('hidden');
-        setTimeout(() => content.classList.replace('scale-95', 'scale-100'), 10);
-    }
-
-    function cerrarModal() {
-        const modal = document.getElementById('editModal');
-        const content = document.getElementById('modalContent');
-        content.classList.replace('scale-100', 'scale-95');
-        setTimeout(() => modal.classList.add('hidden'), 200);
-    }
+    // Cierra el modal si se hace clic fuera del contenido
+    window.addEventListener('click', function(e) {
+        const modal = document.getElementById('modalNuevoVecino');
+        if (e.target === modal) {
+            modal.classList.add('hidden');
+        }
+    });
 </script>
 </body>
 </html>

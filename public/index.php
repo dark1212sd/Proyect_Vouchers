@@ -1,315 +1,370 @@
 <?php
+// public/index.php
 session_start();
 
-if (!isset($_SESSION['username'])) {
-    header("Location: auth/login.html");
-    exit();
-}
+// 1. LÓGICA INTELIGENTE CON RUTAS ABSOLUTAS DESDE LA RAÍZ (/)
+$urlPortal = "/auth/login.php";
+$textoBoton = "Ingresar al Portal";
+$iconoBoton = "log-in";
 
-require __DIR__ . '/config/db.php';
+if (isset($_SESSION['role']) || isset($_SESSION['rol']) || isset($_SESSION['user_id'])) {
+    $rol = $_SESSION['role'] ?? $_SESSION['rol'] ?? 'user';
 
-// Obtener datos del usuario
-$cedula_usuario = '';
-try {
-    $usuario = $db->usuarios->findOne(['username' => $_SESSION['username']]);
-    if ($usuario) {
-        $cedula_usuario = $usuario['cedula'] ?? '';
+    if ($rol === 'superuser') {
+        $urlPortal = "/super_dashboard.php";
+    } elseif ($rol === 'admin') {
+        $urlPortal = "/dashboard.php";
+    } else {
+        $urlPortal = "/user_panel.php";
     }
 
-    // Obtenemos la configuración de los pagos (si no existe, usamos datos de prueba por ahora)
-    // Más adelante programaremos el panel para editar esto
-    $config = $db->configuracion->findOne(['tipo' => 'datos_pago']);
-    $info_pagomovil = $config['pagomovil'] ?? "Banco: Banesco (0134)\nCI: V-12345678\nTeléfono: 0414-1234567";
-    $info_transferencia = $config['transferencia'] ?? "Banco de Venezuela\nCuenta Corriente\n0102-0000-00-0000000000\nA nombre de: Junta Comunal Lanceros";
-    $info_efectivo = $config['efectivo'] ?? "Entregue el efectivo en un sobre cerrado con su nombre y número de casa a la tesorera (Sra. María - Casa #45) entre 8:00 AM y 6:00 PM.";
-    $info_electronico = $config['electronico'] ?? "Zelle: tesoreria@lanceros.com\nPayPal: paypal.me/lanceros";
-
-} catch (Exception $e) {
-    // Manejo de errores
+    $textoBoton = "Ir a Mi Panel";
+    $iconoBoton = "layout-dashboard";
 }
 ?>
 <!DOCTYPE html>
-<html lang="es">
+<html lang="es" class="scroll-smooth dark">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Reportar Pago - Lanceros de la Victoria</title>
+    <title>VoucherCheck - Auditoría y Control de Pagos</title>
+
+    <!-- Tailwind CSS (CDN) -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/animate.css/4.1.1/animate.min.css" rel="stylesheet">
+
+    <!-- Animate On Scroll (AOS) CSS -->
+    <link href="https://unpkg.com/aos@2.3.1/dist/aos.css" rel="stylesheet">
+
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        neon: {
+                            cyan: '#00f2fe',
+                            emerald: '#10b981',
+                            blue: '#4facfe'
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;800&display=swap');
-        body { font-family: 'Plus Jakarta Sans', sans-serif; }
-        .step-active { border-color: #10b981; color: #10b981; } /* Emerald 500 */
-        .step-inactive { border-color: #e2e8f0; color: #94a3b8; }
-        .line-active { background-color: #10b981; }
-        .line-inactive { background-color: #e2e8f0; }
+        @keyframes slowZoom {
+            0% { transform: scale(1); }
+            100% { transform: scale(1.08); }
+        }
+        .animate-hero-zoom {
+            animation: slowZoom 20s infinite alternate ease-in-out;
+        }
+        .glow-cyan {
+            box-shadow: 0 0 25px -5px rgba(0, 242, 254, 0.3);
+        }
+        /* Clase para el link activo en el menú (Scroll-Spy) */
+        .nav-link-active {
+            color: #00f2fe !important;
+            font-weight: 700 !important;
+            text-shadow: 0 0 12px rgba(0, 242, 254, 0.6);
+        }
     </style>
 </head>
-<body class="bg-slate-50 min-h-screen flex flex-col items-center py-10 px-4">
+<body class="bg-slate-950 text-slate-100 font-sans antialiased selection:bg-cyan-500 selection:text-slate-950 min-h-screen flex flex-col justify-between">
 
-<div class="w-full max-w-2xl mb-6 animate__animated animate__fadeInDown flex justify-between">
-    <a href="user_panel.php" class="text-xs font-bold text-slate-500 hover:text-blue-600 flex items-center gap-2 transition-colors">
-        ← VOLVER A MI PANEL
-    </a>
-</div>
+<!-- BARRA DE NAVEGACIÓN -->
+<header class="fixed top-0 left-0 right-0 z-50 bg-slate-950/80 backdrop-blur-md border-b border-slate-800/80 transition-all duration-300">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-20 flex items-center justify-between">
 
-<div class="animate__animated animate__fadeInUp bg-white p-8 md:p-12 rounded-[2.5rem] shadow-2xl w-full max-w-2xl border border-slate-100">
-
-    <div class="flex items-center justify-between mb-10 relative">
-        <div class="absolute left-0 top-1/2 transform -translate-y-1/2 w-full h-1 bg-slate-200 -z-10 rounded-full"></div>
-        <div id="progress-line" class="absolute left-0 top-1/2 transform -translate-y-1/2 h-1 bg-emerald-500 -z-10 rounded-full transition-all duration-500" style="width: 0%;"></div>
-
-        <div class="flex flex-col items-center bg-white px-2">
-            <div id="icon-step-1" class="w-10 h-10 rounded-full border-4 flex items-center justify-center font-bold bg-white transition-colors step-active">1</div>
-            <span class="text-[10px] font-black uppercase mt-2 text-slate-700">Método</span>
+        <div class="flex items-center space-x-3" data-aos="fade-right" data-aos-duration="800">
+            <img src="/assets/img/logo_alianza_victoriosa_anime.svg" alt="Emblema Alianza Victoriosa" class="w-12 h-12">
+            <div>
+                <span class="text-xl font-black tracking-tight text-white block leading-none">VOUCHER<span class="text-cyan-400">CHECK</span></span>
+                <span class="text-xs font-semibold text-slate-400 tracking-widest uppercase block mt-0.5">Alianza Victoriosa</span>
+            </div>
         </div>
-        <div class="flex flex-col items-center bg-white px-2">
-            <div id="icon-step-2" class="w-10 h-10 rounded-full border-4 flex items-center justify-center font-bold bg-white transition-colors step-inactive">2</div>
-            <span class="text-[10px] font-black uppercase mt-2 text-slate-400">Detalles</span>
+
+        <!-- Menú inteligente de navegación -->
+        <nav id="desktop-nav" class="hidden md:flex items-center space-x-8 font-medium text-sm text-slate-400" data-aos="fade-down" data-aos-duration="800">
+            <a href="#inicio" class="hover:text-cyan-400 transition-all duration-200 py-1">Inicio</a>
+            <a href="#rastreo" class="hover:text-cyan-400 transition-all duration-200 py-1 flex items-center gap-1">
+                <i data-lucide="search" class="w-4 h-4"></i> Consultar Estado
+            </a>
+            <a href="#proceso" class="hover:text-cyan-400 transition-all duration-200 py-1">¿Cómo Funciona?</a>
+            <a href="#beneficios" class="hover:text-cyan-400 transition-all duration-200 py-1">Seguridad</a>
+        </nav>
+
+        <!-- ACCESO DINÁMICO SEGÚN LA SESIÓN ACTIVA -->
+        <div data-aos="fade-left" data-aos-duration="800">
+            <a href="<?php echo $urlPortal; ?>" class="inline-flex items-center justify-center px-6 py-2.5 rounded-xl bg-gradient-to-r from-cyan-500 text-slate-950 to-emerald-400 font-bold text-sm glow-cyan hover:opacity-95 hover:-translate-y-0.5 active:translate-y-0 transition-all duration-200">
+                <i data-lucide="<?php echo $iconoBoton; ?>" class="w-4 h-4 mr-2 stroke-[2.5]"></i>
+                <?php echo $textoBoton; ?>
+            </a>
         </div>
-        <div class="flex flex-col items-center bg-white px-2">
-            <div id="icon-step-3" class="w-10 h-10 rounded-full border-4 flex items-center justify-center font-bold bg-white transition-colors step-inactive">3</div>
-            <span class="text-[10px] font-black uppercase mt-2 text-slate-400">Soporte</span>
-        </div>
+
+    </div>
+</header>
+
+<!-- HERO SECTION -->
+<section id="inicio" class="relative min-h-screen flex items-center justify-center overflow-hidden pt-24 pb-16">
+    <div class="absolute inset-0 z-0 overflow-hidden opacity-30">
+        <img
+                src="https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=2000&q=80"
+                alt="Fondo digital oscuro"
+                class="w-full h-full object-cover object-center animate-hero-zoom"
+        >
+        <div class="absolute inset-0 bg-gradient-to-b from-slate-950 via-slate-950/80 to-slate-950"></div>
     </div>
 
-    <form id="paymentForm" class="relative">
-        <input type="hidden" name="cedula" value="<?php echo htmlspecialchars($cedula_usuario); ?>">
+    <div class="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[300px] bg-gradient-to-tr from-cyan-500/20 to-emerald-500/10 blur-[120px] pointer-events-none -z-10"></div>
 
-        <div id="step-1" class="space-y-6">
-            <div class="text-center mb-6">
-                <h2 class="text-2xl font-black text-slate-800 tracking-tight">¿Cómo realizaste el pago?</h2>
-                <p class="text-slate-400 text-xs font-semibold mt-1">Selecciona la opción correspondiente</p>
-            </div>
+    <div class="relative z-10 max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 text-center my-auto">
 
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <label class="cursor-pointer">
-                    <input type="radio" name="metodo_pago" value="pagomovil" class="peer sr-only" required>
-                    <div class="p-5 rounded-2xl border-2 border-slate-100 peer-checked:border-emerald-500 peer-checked:bg-emerald-50 hover:bg-slate-50 transition-all">
-                        <div class="text-2xl mb-2">📱</div>
-                        <h3 class="font-bold text-slate-700">Pago Móvil</h3>
-                    </div>
-                </label>
-                <label class="cursor-pointer">
-                    <input type="radio" name="metodo_pago" value="transferencia" class="peer sr-only">
-                    <div class="p-5 rounded-2xl border-2 border-slate-100 peer-checked:border-emerald-500 peer-checked:bg-emerald-50 hover:bg-slate-50 transition-all">
-                        <div class="text-2xl mb-2">🏦</div>
-                        <h3 class="font-bold text-slate-700">Transferencia Bancaria</h3>
-                    </div>
-                </label>
-                <label class="cursor-pointer">
-                    <input type="radio" name="metodo_pago" value="efectivo" class="peer sr-only">
-                    <div class="p-5 rounded-2xl border-2 border-slate-100 peer-checked:border-emerald-500 peer-checked:bg-emerald-50 hover:bg-slate-50 transition-all">
-                        <div class="text-2xl mb-2">💵</div>
-                        <h3 class="font-bold text-slate-700">Efectivo</h3>
-                    </div>
-                </label>
-                <label class="cursor-pointer">
-                    <input type="radio" name="metodo_pago" value="electronico" class="peer sr-only">
-                    <div class="p-5 rounded-2xl border-2 border-slate-100 peer-checked:border-emerald-500 peer-checked:bg-emerald-50 hover:bg-slate-50 transition-all">
-                        <div class="text-2xl mb-2">💻</div>
-                        <h3 class="font-bold text-slate-700">Pago Electrónico</h3>
-                    </div>
-                </label>
-            </div>
-
-            <button type="button" onclick="nextStep(2)" class="w-full mt-6 bg-slate-900 text-white font-bold py-4 rounded-2xl hover:bg-emerald-500 transition-all">
-                CONTINUAR
-            </button>
+        <div class="inline-block" data-aos="zoom-in-up" data-aos-duration="1000">
+                <span class="inline-flex items-center px-4 py-1.5 rounded-full text-xs font-bold tracking-wide uppercase bg-slate-900/90 text-cyan-400 border border-cyan-500/30 mb-6 backdrop-blur-md shadow-lg shadow-cyan-500/10">
+                    <span class="w-2 h-2 rounded-full bg-cyan-400 animate-ping mr-2"></span>
+                    Plataforma de Trazabilidad Financiera NoSQL
+                </span>
         </div>
 
-        <div id="step-2" class="hidden space-y-6">
-            <button type="button" onclick="prevStep(1)" class="text-xs font-bold text-slate-400 hover:text-slate-800 mb-4">← Atrás</button>
+        <h1 class="text-4xl sm:text-6xl md:text-7xl font-black text-white tracking-tight leading-none mb-6" data-aos="fade-up" data-aos-delay="200" data-aos-duration="1000">
+            Control y Auditoría de <br>
+            <span class="text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 via-teal-300 to-emerald-400">Vouchers de Pago</span>
+        </h1>
 
-            <div class="bg-blue-50 border border-blue-100 p-5 rounded-2xl mb-6">
-                <h4 class="text-[10px] font-black text-blue-600 uppercase tracking-widest mb-2">Datos para el pago</h4>
-                <pre id="info-instrucciones" class="text-xs text-slate-600 font-sans whitespace-pre-wrap"></pre>
-            </div>
+        <p class="max-w-2xl mx-auto text-lg sm:text-xl text-slate-300 font-normal leading-relaxed mb-10" data-aos="fade-up" data-aos-delay="400" data-aos-duration="1000">
+            Verifica el estatus de tus transferencias en tiempo real, audita números de referencia y gestiona tu solvencia comunal de manera 100% digital.
+        </p>
 
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-
-                <div class="md:col-span-2">
-                    <label class="block text-[10px] font-extrabold text-slate-500 uppercase mb-2">Monto Declarado</label>
-                    <input type="number" step="0.01" name="monto" id="monto" placeholder="0.00" class="w-full px-5 py-4 rounded-2xl bg-slate-50 focus:ring-4 focus:ring-emerald-100 outline-none font-bold text-lg">
-                </div>
-
-                <div id="caja-divisa" class="hidden md:col-span-2">
-                    <label class="block text-[10px] font-extrabold text-slate-500 uppercase mb-2">Moneda Entregada</label>
-                    <select name="divisa" class="w-full px-5 py-4 rounded-2xl bg-slate-50 focus:ring-4 focus:ring-emerald-100 outline-none font-bold text-slate-700 appearance-none">
-                        <option value="bs">Bolívares (Bs)</option>
-                        <option value="usd">Dólares (USD)</option>
-                        <option value="eur">Euros (EUR)</option>
-                    </select>
-                </div>
-
-                <div id="caja-plataforma" class="hidden md:col-span-2">
-                    <label class="block text-[10px] font-extrabold text-slate-500 uppercase mb-2">Plataforma Utilizada</label>
-                    <input type="text" name="plataforma" placeholder="Ej: PayPal, Zelle, Binance Pay" class="w-full px-5 py-4 rounded-2xl bg-slate-50 focus:ring-4 focus:ring-emerald-100 outline-none font-bold text-slate-700">
-                </div>
-
-                <div id="caja-referencia" class="md:col-span-2">
-                    <label class="block text-[10px] font-extrabold text-slate-500 uppercase mb-2">N° de Referencia / Recibo</label>
-                    <input type="text" name="referencia" id="referencia" placeholder="Últimos dígitos de la transacción" class="w-full px-5 py-4 rounded-2xl bg-slate-50 focus:ring-4 focus:ring-emerald-100 outline-none font-bold text-slate-700">
-                </div>
-            </div>
-
-            <button type="button" onclick="nextStep(3)" class="w-full mt-6 bg-slate-900 text-white font-bold py-4 rounded-2xl hover:bg-emerald-500 transition-all">
-                CONTINUAR
-            </button>
+        <!-- BOTONES DE ACCIÓN PÚBLICOS -->
+        <div class="flex flex-col sm:flex-row items-center justify-center gap-4 mb-16" data-aos="fade-up" data-aos-delay="600" data-aos-duration="1000">
+            <a href="#rastreo" class="w-full sm:w-auto px-8 py-4 rounded-xl bg-gradient-to-r from-cyan-500 to-emerald-400 text-slate-950 font-extrabold text-base glow-cyan hover:scale-[1.02] active:scale-[0.98] transition-all duration-200 flex items-center justify-center shadow-lg">
+                <i data-lucide="search" class="w-5 h-5 mr-2 stroke-[2.5]"></i>
+                Consultar Estado de Voucher
+            </a>
+            <a href="#proceso" class="w-full sm:w-auto px-8 py-4 rounded-xl bg-slate-900 hover:bg-slate-800 text-cyan-400 font-bold text-base border border-cyan-500/30 hover:border-cyan-400/60 transition-all duration-200 flex items-center justify-center shadow-lg">
+                <i data-lucide="help-circle" class="w-5 h-5 mr-2"></i>
+                ¿Cómo Funciona?
+            </a>
         </div>
 
-        <div id="step-3" class="hidden space-y-6">
-            <button type="button" onclick="prevStep(2)" class="text-xs font-bold text-slate-400 hover:text-slate-800 mb-4">← Atrás</button>
+        <!-- BUSCADOR DE ESTATUS DE VOUCHERS -->
+        <div id="rastreo" class="max-w-3xl mx-auto bg-slate-900/90 border border-slate-800 p-6 sm:p-8 rounded-3xl backdrop-blur-xl shadow-2xl relative overflow-hidden scroll-mt-28" data-aos="zoom-in" data-aos-delay="800">
+            <div class="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-cyan-500 via-teal-400 to-emerald-500"></div>
 
-            <div class="text-center mb-6">
-                <h2 class="text-2xl font-black text-slate-800 tracking-tight">Casi listo</h2>
-                <p id="texto-soporte" class="text-slate-400 text-xs font-semibold mt-1">Adjunta el comprobante (Opcional para efectivo)</p>
+            <div class="flex flex-col sm:flex-row items-center justify-between gap-4 mb-6 text-left">
+                <div>
+                    <h3 class="text-lg font-bold text-white flex items-center gap-2">
+                        <i data-lucide="activity" class="w-5 h-5 text-cyan-400"></i>
+                        Rastreo en Tiempo Real
+                    </h3>
+                    <p class="text-xs text-slate-400">Verifica si tu comprobante ya fue auditado por tesorería sin iniciar sesión.</p>
+                </div>
+                <span class="px-3 py-1 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-xs font-semibold flex items-center gap-1.5">
+                        <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                        Motor Activo
+                    </span>
             </div>
 
-            <div class="bg-emerald-50/50 p-6 rounded-3xl border-2 border-dashed border-emerald-200 hover:border-emerald-500 transition-all relative">
-                <label class="block text-[10px] font-extrabold text-emerald-600 uppercase mb-3 text-center cursor-pointer">
-                    Toca para subir imagen
-                </label>
-                <input type="file" id="fileInput" name="comprobante" accept="image/*"
-                       class="block w-full text-[10px] text-slate-400 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-[10px] file:font-bold file:bg-emerald-500 file:text-white cursor-pointer">
-            </div>
+            <form action="validar_pago.php" method="GET" class="flex flex-col sm:flex-row gap-3">
+                <div class="relative flex-grow">
+                    <div class="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-slate-500">
+                        <i data-lucide="hash" class="w-5 h-5"></i>
+                    </div>
+                    <input
+                            type="text"
+                            name="referencia"
+                            required
+                            placeholder="Ej: 48291048 (N° de Referencia o Cédula)"
+                            class="w-full pl-11 pr-4 py-3.5 bg-slate-950 border border-slate-700 rounded-xl text-white placeholder-slate-500 text-sm focus:outline-none focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400 transition-all"
+                    >
+                </div>
+                <button type="submit" class="px-8 py-3.5 bg-slate-800 hover:bg-cyan-500 hover:text-slate-950 text-cyan-400 font-bold rounded-xl border border-cyan-500/30 hover:border-transparent transition-all duration-200 flex items-center justify-center gap-2 text-sm shrink-0">
+                    <span>Verificar Ahora</span>
+                    <i data-lucide="arrow-right" class="w-4 h-4"></i>
+                </button>
+            </form>
 
-            <div id="previewContainer" class="hidden mt-4">
-                <img id="imagePreview" src="#" class="w-full h-48 object-contain rounded-xl border border-slate-200 bg-slate-50 p-2">
+            <div class="grid grid-cols-3 gap-2 mt-6 pt-6 border-t border-slate-800/80 text-center text-[11px] text-slate-400">
+                <div class="flex items-center justify-center gap-1.5">
+                    <span class="w-2 h-2 rounded-full bg-amber-400"></span>
+                    <span>En Revisión</span>
+                </div>
+                <div class="flex items-center justify-center gap-1.5">
+                    <span class="w-2 h-2 rounded-full bg-emerald-400"></span>
+                    <span>Aprobado / Solvente</span>
+                </div>
+                <div class="flex items-center justify-center gap-1.5">
+                    <span class="w-2 h-2 rounded-full bg-rose-500"></span>
+                    <span>Rechazado</span>
+                </div>
             </div>
-
-            <button type="submit" id="btnEnviar" class="w-full mt-6 bg-emerald-500 text-white font-black py-5 rounded-2xl hover:bg-emerald-600 transform hover:-translate-y-1 transition-all shadow-xl shadow-emerald-200">
-                <span id="btnText">FINALIZAR Y ENVIAR</span>
-            </button>
         </div>
-    </form>
-</div>
 
+    </div>
+</section>
+
+<!-- SECCIÓN: PROTOCOLO DE AUDITORÍA -->
+<section id="proceso" class="py-24 bg-slate-950 relative z-10 border-t border-slate-900 scroll-mt-20">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+
+        <div class="text-center max-w-3xl mx-auto mb-16" data-aos="fade-up">
+            <h2 class="text-xs font-bold text-cyan-400 tracking-widest uppercase mb-2">Protocolo de Auditoría</h2>
+            <p class="text-3xl sm:text-4xl font-black text-white tracking-tight">¿Cómo validamos tu voucher?</p>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
+
+            <div class="p-8 rounded-2xl bg-slate-900/60 border border-slate-800 hover:border-cyan-500/50 hover:shadow-2xl hover:shadow-cyan-500/10 hover:-translate-y-1.5 transition-all duration-300 group" data-aos="fade-up" data-aos-delay="100">
+                <div class="w-14 h-14 rounded-xl bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 flex items-center justify-center mb-6 group-hover:bg-cyan-400 group-hover:text-slate-950 transition-all duration-300 shadow-sm">
+                    <i data-lucide="upload-cloud" class="w-7 h-7 stroke-[2]"></i>
+                </div>
+                <span class="text-xs font-bold text-cyan-400 uppercase tracking-wider block mb-1">Paso 01</span>
+                <h3 class="text-xl font-bold text-white mb-3">Carga Digital</h3>
+                <p class="text-slate-400 leading-relaxed text-sm">Sube la foto o captura de pantalla de tu transferencia. El sistema extrae el número de referencia y monto reportado.</p>
+            </div>
+
+            <div class="p-8 rounded-2xl bg-slate-900/60 border border-slate-800 hover:border-teal-500/50 hover:shadow-2xl hover:shadow-teal-500/10 hover:-translate-y-1.5 transition-all duration-300 group" data-aos="fade-up" data-aos-delay="200">
+                <div class="w-14 h-14 rounded-xl bg-teal-500/10 text-teal-400 border border-teal-500/20 flex items-center justify-center mb-6 group-hover:bg-teal-400 group-hover:text-slate-950 transition-all duration-300 shadow-sm">
+                    <i data-lucide="cpu" class="w-7 h-7 stroke-[2]"></i>
+                </div>
+                <span class="text-xs font-bold text-teal-400 uppercase tracking-wider block mb-1">Paso 02</span>
+                <h3 class="text-xl font-bold text-white mb-3">Cotejo Antifraude</h3>
+                <p class="text-slate-400 leading-relaxed text-sm">Nuestra base de datos verifica en milisegundos que el comprobante no haya sido utilizado previamente por otro usuario.</p>
+            </div>
+
+            <div class="p-8 rounded-2xl bg-slate-900/60 border border-slate-800 hover:border-emerald-500/50 hover:shadow-2xl hover:shadow-emerald-500/10 hover:-translate-y-1.5 transition-all duration-300 group" data-aos="fade-up" data-aos-delay="300">
+                <div class="w-14 h-14 rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center justify-center mb-6 group-hover:bg-emerald-400 group-hover:text-slate-950 transition-all duration-300 shadow-sm">
+                    <i data-lucide="file-check" class="w-7 h-7 stroke-[2]"></i>
+                </div>
+                <span class="text-xs font-bold text-emerald-400 uppercase tracking-wider block mb-1">Paso 03</span>
+                <h3 class="text-xl font-bold text-white mb-3">Solvencia Inmediata</h3>
+                <p class="text-slate-400 leading-relaxed text-sm">Tras la confirmación de tesorería, obtén un certificado digital de solvencia con código de verificación único.</p>
+            </div>
+
+        </div>
+    </div>
+</section>
+
+<!-- SECCIÓN: ARQUITECTURA FINTECH -->
+<section id="beneficios" class="py-20 bg-slate-900/50 border-t border-slate-900 relative scroll-mt-20">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-12 items-center">
+            <div data-aos="fade-right" data-aos-duration="1000">
+                <span class="text-xs font-bold text-emerald-400 tracking-widest uppercase mb-2 block">Arquitectura FinTech</span>
+                <h2 class="text-3xl sm:text-4xl font-black tracking-tight text-white leading-tight mb-6">
+                    Seguridad de datos e integridad financiera
+                </h2>
+                <p class="text-slate-300 text-base leading-relaxed mb-8">
+                    Este software reemplaza los procesos manuales propensos al error humano, garantizando un registro inmutable y consultable de todos los ingresos comunales bajo los más altos estándares de desarrollo.
+                </p>
+
+                <div class="space-y-4">
+                    <div class="flex items-start space-x-3">
+                        <div class="bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 p-1.5 rounded-lg mt-0.5">
+                            <i data-lucide="database" class="w-4 h-4"></i>
+                        </div>
+                        <div>
+                            <h4 class="font-bold text-white text-sm">Almacenamiento NoSQL (MongoDB)</h4>
+                            <p class="text-slate-400 text-xs">Escalabilidad y rapidez en búsquedas de números de referencia bancaria masivos.</p>
+                        </div>
+                    </div>
+
+                    <div class="flex items-start space-x-3">
+                        <div class="bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 p-1.5 rounded-lg mt-0.5">
+                            <i data-lucide="lock" class="w-4 h-4"></i>
+                        </div>
+                        <div>
+                            <h4 class="font-bold text-white text-sm">Encriptación y Trazabilidad</h4>
+                            <p class="text-slate-400 text-xs">Cada voucher queda ligado criptográficamente al usuario que lo reportó para auditorías futuras.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="bg-gradient-to-tr from-slate-900 to-slate-800 p-8 rounded-3xl border border-slate-700/80 glow-cyan relative" data-aos="zoom-in" data-aos-duration="1000">
+                <div class="absolute -top-4 -right-4 bg-gradient-to-r from-cyan-500 to-emerald-400 text-slate-950 p-3 rounded-2xl font-bold shadow-lg">
+                    <i data-lucide="shield" class="w-8 h-8 stroke-[2.5]"></i>
+                </div>
+                <span class="text-xs text-cyan-400 font-mono block mb-2">SYSTEM STATUS // ONLINE</span>
+                <div class="text-2xl font-black text-white mb-6">Motor de Verificación</div>
+
+                <div class="grid grid-cols-2 gap-4 border-t border-slate-800 pt-6">
+                    <div>
+                        <span class="text-3xl font-black text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-blue-400 block mb-1">0%</span>
+                        <span class="text-xs text-slate-400 font-medium">Margen de Duplicidad</span>
+                    </div>
+                    <div>
+                        <span class="text-3xl font-black text-transparent bg-clip-text bg-gradient-to-r from-teal-400 to-emerald-400 block mb-1">PHP 8.5</span>
+                        <span class="text-xs text-slate-400 font-medium">Backend de Alta Velocidad</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+</section>
+
+<!-- FOOTER -->
+<footer class="bg-slate-950 text-white py-12 border-t border-slate-900">
+    <div class="max-w-7xl mx-auto px-4 text-center">
+        <div class="flex items-center justify-center space-x-2 mb-4">
+            <i data-lucide="shield-check" class="w-5 h-5 text-cyan-400"></i>
+            <span class="text-base font-black tracking-wider text-white">VOUCHER<span class="text-cyan-400">CHECK</span></span>
+        </div>
+        <p class="text-slate-500 text-xs max-w-md mx-auto mb-6">
+            Sistema de Gestión y Auditoría de Comprobantes de Pago desarrollado como Trabajo de Grado para el control financiero comunal.
+        </p>
+        <div class="text-[11px] text-slate-600 font-mono">
+            &copy; <?php echo date('Y'); ?> Todos los derechos reservados.
+        </div>
+    </div>
+</footer>
+
+<!-- SCRIPTS DE ICONOS, ANIMACIÓN Y SCROLL-SPY -->
+<script src="https://unpkg.com/aos@2.3.1/dist/aos.js"></script>
 <script>
-    // Textos inyectados desde PHP
-    const datosPago = {
-        'pagomovil': `<?php echo addslashes($info_pagomovil); ?>`,
-        'transferencia': `<?php echo addslashes($info_transferencia); ?>`,
-        'efectivo': `<?php echo addslashes($info_efectivo); ?>`,
-        'electronico': `<?php echo addslashes($info_electronico); ?>`
-    };
+    // 1. Inicializar iconos
+    lucide.createIcons();
 
-    function nextStep(step) {
-        // Validar paso 1
-        if (step === 2) {
-            const metodo = document.querySelector('input[name="metodo_pago"]:checked');
-            if (!metodo) { alert("Selecciona un método de pago primero."); return; }
-
-            // Llenar info y configurar campos según método
-            document.getElementById('info-instrucciones').innerText = datosPago[metodo.value];
-
-            // Lógica de visualización
-            const cajaDivisa = document.getElementById('caja-divisa');
-            const cajaPlataforma = document.getElementById('caja-plataforma');
-            const cajaReferencia = document.getElementById('caja-referencia');
-            const fileInput = document.getElementById('fileInput');
-
-            // Resetear
-            cajaDivisa.classList.add('hidden');
-            cajaPlataforma.classList.add('hidden');
-            cajaReferencia.classList.remove('hidden');
-            fileInput.required = true;
-            document.getElementById('texto-soporte').innerText = "Adjunta la captura de pantalla de la transacción";
-
-            if (metodo.value === 'efectivo') {
-                cajaDivisa.classList.remove('hidden');
-                cajaReferencia.classList.add('hidden');
-                fileInput.required = false; // En efectivo la foto es opcional
-                document.getElementById('texto-soporte').innerText = "Si tiene una foto del recibo o sobre, puede subirla (Opcional)";
-            } else if (metodo.value === 'electronico') {
-                cajaPlataforma.classList.remove('hidden');
-            }
-        }
-
-        // Validar paso 2
-        if (step === 3) {
-            const monto = document.getElementById('monto').value;
-            const metodo = document.querySelector('input[name="metodo_pago"]:checked').value;
-            const referencia = document.getElementById('referencia').value;
-
-            if (!monto) { alert("Ingresa el monto."); return; }
-            if (metodo !== 'efectivo' && !referencia) { alert("Ingresa la referencia."); return; }
-        }
-
-        // Animación de cambio de pasos
-        document.querySelectorAll('[id^="step-"]').forEach(el => el.classList.add('hidden'));
-        const nextEl = document.getElementById(`step-${step}`);
-        nextEl.classList.remove('hidden');
-        nextEl.classList.add('animate__animated', 'animate__fadeInRight');
-
-        // Actualizar barra verde (Stepper UI)
-        document.getElementById('progress-line').style.width = step === 1 ? '0%' : step === 2 ? '50%' : '100%';
-
-        for (let i = 1; i <= 3; i++) {
-            const icon = document.getElementById(`icon-step-${i}`);
-            const text = icon.nextElementSibling;
-            if (i <= step) {
-                icon.className = "w-10 h-10 rounded-full border-4 flex items-center justify-center font-bold transition-colors border-emerald-500 bg-emerald-500 text-white";
-                text.classList.add('text-emerald-600'); text.classList.remove('text-slate-400', 'text-slate-700');
-            } else {
-                icon.className = "w-10 h-10 rounded-full border-4 flex items-center justify-center font-bold bg-white transition-colors border-slate-200 text-slate-400";
-                text.classList.remove('text-emerald-600', 'text-slate-700'); text.classList.add('text-slate-400');
-            }
-        }
-    }
-
-    function prevStep(step) {
-        document.querySelectorAll('[id^="step-"]').forEach(el => el.classList.add('hidden'));
-        const prevEl = document.getElementById(`step-${step}`);
-        prevEl.classList.remove('hidden');
-        prevEl.classList.add('animate__animated', 'animate__fadeInLeft');
-
-        // Simular que el nextStep arregla la barra retrocediendo
-        nextStep(step);
-    }
-
-    // Previsualización de la imagen
-    document.getElementById('fileInput').addEventListener('change', function(e) {
-        const file = this.files[0];
-        if (file) {
-            const reader = new FileReader();
-            reader.onload = (e) => {
-                document.getElementById('imagePreview').src = e.target.result;
-                document.getElementById('previewContainer').classList.remove('hidden');
-            }
-            reader.readAsDataURL(file);
-        }
+    // 2. Inicializar animaciones AOS
+    AOS.init({
+        once: true,
+        offset: 60,
+        easing: 'ease-out-cubic',
     });
 
-    // Envío del formulario asíncrono
-    document.getElementById('paymentForm').addEventListener('submit', async (e) => {
-        e.preventDefault();
-        const btn = document.getElementById('btnEnviar');
-        const form = e.target;
+    // 3. Lógica de Scroll-Spy: Ilumina el link del menú según la posición actual
+    document.addEventListener('DOMContentLoaded', () => {
+        const sections = document.querySelectorAll('section[id]');
+        const navLinks = document.querySelectorAll('#desktop-nav a');
 
-        btn.disabled = true;
-        btn.innerHTML = "PROCESANDO...";
+        const highlightNavigation = () => {
+            let scrollPosition = window.scrollY + 150;
 
-        try {
-            const response = await fetch('procesar_pago.php', {
-                method: 'POST',
-                body: new FormData(form)
+            sections.forEach(section => {
+                const sectionTop = section.offsetTop;
+                const sectionHeight = section.offsetHeight;
+                const sectionId = section.getAttribute('id');
+
+                if (scrollPosition >= sectionTop && scrollPosition < sectionTop + sectionHeight) {
+                    navLinks.forEach(link => {
+                        link.classList.remove('nav-link-active');
+                        if (link.getAttribute('href') === `#${sectionId}`) {
+                            link.classList.add('nav-link-active');
+                        }
+                    });
+                }
             });
-            const result = await response.json();
+        };
 
-            if (result.status === 'success') {
-                alert(`¡Éxito! ${result.message}`);
-                window.location.href = "user_panel.php";
-            } else {
-                alert(`Error: ${result.message}`);
-                btn.disabled = false;
-                btn.innerHTML = "FINALIZAR Y ENVIAR";
-            }
-        } catch (error) {
-            alert("Ocurrió un error en el servidor.");
-            btn.disabled = false;
-            btn.innerHTML = "FINALIZAR Y ENVIAR";
-        }
+        window.addEventListener('scroll', highlightNavigation);
+        highlightNavigation();
     });
 </script>
 </body>

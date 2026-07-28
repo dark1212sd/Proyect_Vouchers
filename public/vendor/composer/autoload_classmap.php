@@ -6,12 +6,9 @@ $vendorDir = dirname(__DIR__);
 $baseDir = dirname($vendorDir);
 
 return array(
-    'Attribute' => $vendorDir . '/symfony/polyfill-php80/Resources/stubs/Attribute.php',
-    'CURLStringFile' => $vendorDir . '/symfony/polyfill-php81/Resources/stubs/CURLStringFile.php',
     'Composer\\InstalledVersions' => $vendorDir . '/composer/InstalledVersions.php',
-    'PhpToken' => $vendorDir . '/symfony/polyfill-php80/Resources/stubs/PhpToken.php',
-    'ReturnTypeWillChange' => $vendorDir . '/symfony/polyfill-php81/Resources/stubs/ReturnTypeWillChange.php',
-    'Stringable' => $vendorDir . '/symfony/polyfill-php80/Resources/stubs/Stringable.php',
-    'UnhandledMatchError' => $vendorDir . '/symfony/polyfill-php80/Resources/stubs/UnhandledMatchError.php',
-    'ValueError' => $vendorDir . '/symfony/polyfill-php80/Resources/stubs/ValueError.php',
+    'DelayedTargetValidation' => $vendorDir . '/symfony/polyfill-php85/Resources/stubs/DelayedTargetValidation.php',
+    'Filter\\FilterException' => $vendorDir . '/symfony/polyfill-php85/Resources/stubs/Filter/FilterException.php',
+    'Filter\\FilterFailedException' => $vendorDir . '/symfony/polyfill-php85/Resources/stubs/Filter/FilterFailedException.php',
+    'NoDiscard' => $vendorDir . '/symfony/polyfill-php85/Resources/stubs/NoDiscard.php',
 );
