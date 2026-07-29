@@ -72,6 +72,11 @@ if (isset($_SESSION['role']) || isset($_SESSION['rol']) || isset($_SESSION['user
             font-weight: 700 !important;
             text-shadow: 0 0 12px rgba(0, 242, 254, 0.6);
         }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .animate-fade-in { animation: fadeIn 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
     </style>
 </head>
 <body class="bg-slate-950 text-slate-100 font-sans antialiased selection:bg-cyan-500 selection:text-slate-950 min-h-screen flex flex-col justify-between">
@@ -152,7 +157,7 @@ if (isset($_SESSION['role']) || isset($_SESSION['rol']) || isset($_SESSION['user
             </a>
         </div>
 
-        <!-- BUSCADOR DE ESTATUS DE VOUCHERS -->
+        <!-- BUSCADOR CON RASTREO AJAX EN TIEMPO REAL -->
         <div id="rastreo" class="max-w-3xl mx-auto bg-slate-900/90 border border-slate-800 p-6 sm:p-8 rounded-3xl backdrop-blur-xl shadow-2xl relative overflow-hidden scroll-mt-28" data-aos="zoom-in" data-aos-delay="800">
             <div class="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-cyan-500 via-teal-400 to-emerald-500"></div>
 
@@ -170,24 +175,76 @@ if (isset($_SESSION['role']) || isset($_SESSION['rol']) || isset($_SESSION['user
                     </span>
             </div>
 
-            <form action="validar_pago.php" method="GET" class="flex flex-col sm:flex-row gap-3">
+            <!-- CAMPO CON SOPORTE PARA N° DE RASTREO (AV-2026-XXXX) O REFERENCIA -->
+            <form id="formRastreo" class="flex flex-col sm:flex-row gap-3">
                 <div class="relative flex-grow">
                     <div class="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-slate-500">
                         <i data-lucide="hash" class="w-5 h-5"></i>
                     </div>
                     <input
                             type="text"
+                            id="inputReferencia"
                             name="referencia"
                             required
-                            placeholder="Ej: 48291048 (N° de Referencia o Cédula)"
-                            class="w-full pl-11 pr-4 py-3.5 bg-slate-950 border border-slate-700 rounded-xl text-white placeholder-slate-500 text-sm focus:outline-none focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400 transition-all"
+                            autocomplete="off"
+                            placeholder="Ej: AV-2026-748291 o N° de Referencia..."
+                            class="w-full pl-11 pr-4 py-3.5 bg-slate-950 border border-slate-700 rounded-xl text-white placeholder-slate-500 text-sm focus:outline-none focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400 transition-all font-mono font-bold uppercase"
                     >
                 </div>
-                <button type="submit" class="px-8 py-3.5 bg-slate-800 hover:bg-cyan-500 hover:text-slate-950 text-cyan-400 font-bold rounded-xl border border-cyan-500/30 hover:border-transparent transition-all duration-200 flex items-center justify-center gap-2 text-sm shrink-0">
+                <button type="submit" id="btnBuscar" class="px-8 py-3.5 bg-slate-800 hover:bg-cyan-500 hover:text-slate-950 text-cyan-400 font-bold rounded-xl border border-cyan-500/30 hover:border-transparent transition-all duration-200 flex items-center justify-center gap-2 text-sm shrink-0">
                     <span>Verificar Ahora</span>
                     <i data-lucide="arrow-right" class="w-4 h-4"></i>
                 </button>
             </form>
+
+            <!-- TARJETA DE DIAGNÓSTICO EN VIVO (OCULTA HASTA LA CONSULTA) -->
+            <div id="resultadoContainer" class="hidden mt-6 pt-6 border-t border-slate-800/80 animate-fade-in text-left">
+
+                <!-- ESTADO: NO ENCONTRADO -->
+                <div id="noEncontrado" class="hidden text-center py-4">
+                    <div class="w-10 h-10 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-400 flex items-center justify-center mx-auto mb-2">
+                        <i data-lucide="file-x-2" class="w-5 h-5"></i>
+                    </div>
+                    <h4 class="font-bold text-white text-sm">Comprobante no localizado</h4>
+                    <p id="msgNoEncontrado" class="text-xs text-slate-400 mt-1">Verifica haber ingresado correctamente tu código de rastreo o recibo bancario.</p>
+                </div>
+
+                <!-- ESTADO: ENCONTRADO (TARJETA WIZARD) -->
+                <div id="tarjetaVoucher" class="hidden space-y-4">
+                    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-950/80 p-4 rounded-xl border border-slate-800/80">
+                        <div>
+                            <span class="text-[10px] font-extrabold uppercase tracking-widest text-slate-500 block">N° de Rastreo Oficial</span>
+                            <span id="resReferencia" class="text-lg font-mono font-black text-cyan-400 block mt-0.5">AV-0000-000000</span>
+                            <span id="resCedula" class="text-xs text-slate-400 font-semibold block mt-0.5 font-mono">Ref. Banco: #000000 | CI: V-000***00</span>
+                        </div>
+                        <div class="text-left sm:text-right">
+                            <span class="text-[10px] font-extrabold uppercase tracking-widest text-slate-500 block">Monto Declarado</span>
+                            <span id="resMonto" class="text-lg font-mono font-black text-emerald-400 block mt-0.5">Bs. 0,00</span>
+                            <span id="resMetodo" class="text-xs text-slate-400 font-semibold block mt-0.5 uppercase">MÉTODO</span>
+                        </div>
+                    </div>
+
+                    <!-- BARRA DE PROGRESO DE 3 PASOS -->
+                    <div class="bg-slate-950/40 p-4 rounded-xl border border-slate-800/60">
+                        <div class="flex items-center justify-between gap-2 mb-2" id="barraPasos">
+                            <span id="paso1" class="h-2 w-1/3 rounded-full bg-cyan-400 shadow-lg shadow-cyan-500/50"></span>
+                            <span id="paso2" class="h-2 w-1/3 rounded-full bg-slate-800"></span>
+                            <span id="paso3" class="h-2 w-1/3 rounded-full bg-slate-800"></span>
+                        </div>
+                        <div class="flex items-center justify-between">
+                            <div class="flex items-center gap-2">
+                                <span id="badgeIcono" class="p-1.5 rounded-lg bg-slate-800 text-slate-300"><i data-lucide="clock" class="w-4 h-4"></i></span>
+                                <div>
+                                    <span class="text-[10px] font-extrabold uppercase tracking-wider text-slate-500 block">Estatus de Auditoría</span>
+                                    <span id="resEstadoText" class="text-xs font-black text-white uppercase tracking-wide">En Revisión</span>
+                                </div>
+                            </div>
+                            <span id="resFecha" class="text-xs font-mono text-slate-400">00/00/0000</span>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
 
             <div class="grid grid-cols-3 gap-2 mt-6 pt-6 border-t border-slate-800/80 text-center text-[11px] text-slate-400">
                 <div class="flex items-center justify-center gap-1.5">
@@ -326,7 +383,7 @@ if (isset($_SESSION['role']) || isset($_SESSION['rol']) || isset($_SESSION['user
     </div>
 </footer>
 
-<!-- SCRIPTS DE ICONOS, ANIMACIÓN Y SCROLL-SPY -->
+<!-- SCRIPTS DE ICONOS, ANIMACIÓN, RASTREO Y SCROLL-SPY -->
 <script src="https://unpkg.com/aos@2.3.1/dist/aos.js"></script>
 <script>
     // 1. Inicializar iconos
@@ -365,6 +422,92 @@ if (isset($_SESSION['role']) || isset($_SESSION['rol']) || isset($_SESSION['user
 
         window.addEventListener('scroll', highlightNavigation);
         highlightNavigation();
+    });
+
+    // 4. LÓGICA AJAX PARA EL RASTREADOR EN TIEMPO REAL
+    document.getElementById('formRastreo').addEventListener('submit', async function(e) {
+        e.preventDefault();
+        const btn = document.getElementById('btnBuscar');
+        const originalHtml = btn.innerHTML;
+        const ref = document.getElementById('inputReferencia').value.trim();
+
+        if (!ref) return;
+
+        btn.disabled = true;
+        btn.innerHTML = `<svg class="animate-spin h-4 w-4 text-black inline" viewBox="0 0 24 24" fill="none"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg> <span>Consultando...</span>`;
+
+        const resContainer = document.getElementById('resultadoContainer');
+        const noEncontrado = document.getElementById('noEncontrado');
+        const tarjeta      = document.getElementById('tarjetaVoucher');
+
+        try {
+            const response = await fetch('api_rastreo.php', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ referencia: ref })
+            });
+
+            const data = await response.json();
+            resContainer.classList.remove('hidden');
+
+            if (data.status === 'success') {
+                noEncontrado.classList.add('hidden');
+                tarjeta.classList.remove('hidden');
+
+                // Llenar datos de la tarjeta (priorizando el N° de Rastreo Oficial)
+                document.getElementById('resReferencia').innerText = data.numero_rastreo || ('#' + data.referencia);
+                document.getElementById('resCedula').innerText     = `Ref. Banco: #${data.referencia} | CI: ${data.cedula}`;
+                document.getElementById('resMonto').innerText      = 'Bs. ' + data.monto;
+                document.getElementById('resMetodo').innerText     = data.metodo;
+                document.getElementById('resFecha').innerText      = data.fecha;
+                document.getElementById('resEstadoText').innerText = data.estado;
+
+                // Lógica algorítmica visual para la barra de estatus
+                const p1 = document.getElementById('paso1');
+                const p2 = document.getElementById('paso2');
+                const p3 = document.getElementById('paso3');
+                const badge = document.getElementById('badgeIcono');
+
+                p1.className = "h-2 w-1/3 rounded-full bg-cyan-400 shadow-lg shadow-cyan-500/50";
+                p2.className = "h-2 w-1/3 rounded-full bg-slate-800";
+                p3.className = "h-2 w-1/3 rounded-full bg-slate-800";
+
+                if (['en revisión', 'pendiente', 'verificando'].includes(data.raw_status)) {
+                    p2.className = "h-2 w-1/3 rounded-full bg-amber-400 animate-pulse shadow-lg shadow-amber-500/50";
+                    badge.className = "p-1.5 rounded-lg bg-amber-500/10 text-amber-400 border border-amber-500/20";
+                    badge.innerHTML = '<i data-lucide="clock" class="w-4 h-4"></i>';
+                } else if (['aprobado', 'validado', 'solvente', 'completado'].includes(data.raw_status)) {
+                    p2.className = "h-2 w-1/3 rounded-full bg-emerald-400";
+                    p3.className = "h-2 w-1/3 rounded-full bg-emerald-400 shadow-lg shadow-emerald-500/50";
+                    badge.className = "p-1.5 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20";
+                    badge.innerHTML = '<i data-lucide="shield-check" class="w-4 h-4"></i>';
+                } else if (data.raw_status === 'rechazado') {
+                    p1.className = "h-2 w-1/3 rounded-full bg-rose-500";
+                    p2.className = "h-2 w-1/3 rounded-full bg-rose-500";
+                    p3.className = "h-2 w-1/3 rounded-full bg-rose-500 shadow-lg shadow-rose-500/50";
+                    badge.className = "p-1.5 rounded-lg bg-rose-500/10 text-rose-400 border border-rose-500/20";
+                    badge.innerHTML = '<i data-lucide="x-circle" class="w-4 h-4"></i>';
+                } else if (data.raw_status === 'anulado') {
+                    p1.className = "h-2 w-1/3 rounded-full bg-slate-600";
+                    p2.className = "h-2 w-1/3 rounded-full bg-slate-600";
+                    p3.className = "h-2 w-1/3 rounded-full bg-slate-600";
+                    badge.className = "p-1.5 rounded-lg bg-slate-800 text-slate-400";
+                    badge.innerHTML = '<i data-lucide="trash-2" class="w-4 h-4"></i>';
+                }
+
+                lucide.createIcons();
+            } else {
+                tarjeta.classList.add('hidden');
+                noEncontrado.classList.remove('hidden');
+                document.getElementById('msgNoEncontrado').innerText = data.message;
+            }
+        } catch (err) {
+            alert('❌ Error de comunicación con el servidor al consultar.');
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = originalHtml;
+            lucide.createIcons();
+        }
     });
 </script>
 </body>

@@ -1,348 +1,273 @@
 <?php
 // public/dashboard.php
 session_start();
-ini_set('display_errors', 1);
-error_reporting(E_ALL);
 
-// Protección: Solo Admin o Superuser
-if (!isset($_SESSION['user_id']) || !in_array($_SESSION['role'] ?? '', ['admin', 'superuser'])) {
-    header("Location: /auth/login.php");
+error_reporting(E_ALL & ~E_DEPRECATED & ~E_NOTICE);
+ini_set('display_errors', 0);
+
+// Verificación estricta de seguridad: Solo Admins
+$rol = $_SESSION['role'] ?? $_SESSION['rol'] ?? 'user';
+if (!isset($_SESSION['user_id']) || !in_array($rol, ['admin', 'superuser'])) {
+    header('Location: auth/login.php');
     exit();
 }
 
-require_once __DIR__ . '/config/db.php';
+require __DIR__ . '/config/db.php';
 
-// 1. Filtro por Banco o Referencia (Si viene por GET)
-$filtroBanco = $_GET['banco'] ?? '';
-$condicionBusqueda = [];
-if (!empty($filtroBanco)) {
-    // Busca coincidencias parciales con el banco o referencia usando Regex
-    $condicionBusqueda['$or'] = [
-            ['banco' => new MongoDB\BSON\Regex($filtroBanco, 'i')],
-            ['referencia' => new MongoDB\BSON\Regex($filtroBanco, 'i')],
-            ['referencia_bancaria' => new MongoDB\BSON\Regex($filtroBanco, 'i')]
-    ];
-}
+$nombreAdmin = $_SESSION['nombre'] ?? $_SESSION['username'] ?? 'Administrador';
 
-// 2. Obtener todos los pagos (aplicando filtro si existe)
-$pagosCursor = $db->pagos->find($condicionBusqueda, ['sort' => ['created_at' => -1]]);
-$pagos = iterator_to_array($pagosCursor);
+// =================================================================
+// LÓGICA DE ESTADÍSTICAS Y EXTRACCIÓN DE PAGOS PENDIENTES
+// =================================================================
+$todosLosPagosCursor = $db->pagos->find([], ['sort' => ['created_at' => -1, 'fecha_declaracion' => -1]]);
 
-// 3. Obtener total de usuarios registrados
-$totalUsuarios = $db->usuarios->countDocuments(['role' => 'user']);
-
-// 4. Calcular métricas globales y agrupar para el calendario
 $totalValidado = 0;
-$totalEnRevision = 0;
-$pendientesCount = 0;
+$totalPendiente = 0;
+$countPendientes = 0;
+$pagosPendientes = [];
 
-$mesActual = date('m');
-$anioActual = date('Y');
-$pagosPorDia = []; // Array para llenar el calendario interactivo
+foreach ($todosLosPagosCursor as $pago) {
+    // Normalizamos el estatus para evitar problemas de mayúsculas, minúsculas o espacios
+    $est = strtolower(trim($pago['estado'] ?? $pago['estatus'] ?? 'en revisión'));
+    $monto = floatval((string)($pago['monto'] ?? 0));
 
-foreach ($pagos as $pago) {
-    $monto  = floatval((string)($pago['monto'] ?? 0));
-    $estado = strtolower(trim($pago['estado'] ?? $pago['estatus'] ?? 'en revisión'));
-
-    if (in_array($estado, ['aprobado', 'validado', 'solvente'])) {
+    if (in_array($est, ['aprobado', 'validado', 'completado', 'solvente'])) {
         $totalValidado += $monto;
-    } elseif (in_array($estado, ['en revisión', 'pendiente'])) {
-        $totalEnRevision += $monto;
-        $pendientesCount++;
-    }
-
-    // Agrupar para el calendario (Solo pagos de este mes)
-    $fechaPago = null;
-    if (!empty($pago['fecha_pago'])) {
-        $fechaPago = strtotime($pago['fecha_pago']);
-    } elseif (!empty($pago['fecha_declaracion']) && $pago['fecha_declaracion'] instanceof MongoDB\BSON\UTCDateTime) {
-        $fechaPago = $pago['fecha_declaracion']->toDateTime()->getTimestamp();
-    } elseif (!empty($pago['created_at']) && $pago['created_at'] instanceof MongoDB\BSON\UTCDateTime) {
-        $fechaPago = $pago['created_at']->toDateTime()->getTimestamp();
-    }
-
-    if ($fechaPago && date('m', $fechaPago) === $mesActual && date('Y', $fechaPago) === $anioActual) {
-        $dia = (int)date('d', $fechaPago);
-        if (!isset($pagosPorDia[$dia])) {
-            $pagosPorDia[$dia] = [];
-        }
-        $pagosPorDia[$dia][] = [
-                'nombre' => $pago['nombre'] ?? 'Vecino',
-                'estado' => $estado
-        ];
+    } elseif (in_array($est, ['en revisión', 'pendiente', 'verificando', 'revision'])) {
+        $totalPendiente += $monto;
+        $countPendientes++;
+        // Guardamos los que están en revisión en un array para usarlos en la tabla de abajo
+        $pagosPendientes[] = $pago;
     }
 }
+
+// Obtener la cantidad de residentes registrados
+$totalUsuarios = $db->usuarios->countDocuments(['role' => ['$ne' => 'admin']]);
+if ($totalUsuarios == 0) {
+    $totalUsuarios = $db->usuarios->countDocuments([]); // Fallback si no hay distincion de roles
+}
+
 ?>
 <!DOCTYPE html>
 <html lang="es" class="dark">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Panel de Administración - Alianza Victoriosa</title>
-
-    <!-- Tailwind CSS -->
+    <title>Panel de Administración - VoucherCheck</title>
     <script src="https://cdn.tailwindcss.com"></script>
-
-    <!-- Lucide Icons -->
     <script src="https://unpkg.com/lucide@latest"></script>
-
-    <script>
-        tailwind.config = {
-            darkMode: 'class',
-            theme: {
-                extend: {
-                    colors: {
-                        neon: { cyan: '#00f2fe', emerald: '#10b981', blue: '#4facfe', amber: '#f59e0b' }
-                    }
-                }
-            }
-        }
-    </script>
-
     <style>
-        .glow-cyan { box-shadow: 0 0 25px -5px rgba(0, 242, 254, 0.3); }
-        .glow-emerald { box-shadow: 0 0 25px -5px rgba(16, 185, 129, 0.3); }
-        .glow-amber { box-shadow: 0 0 25px -5px rgba(245, 158, 11, 0.25); }
-        @keyframes fadeIn { from { opacity: 0; transform: scale(0.95); } to { opacity: 1; transform: scale(1); } }
-        .animate-modal { animation: fadeIn 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
-
-        /* Ocultar scrollbar para la tabla y el calendario */
-        .no-scrollbar::-webkit-scrollbar { display: none; }
-        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
+        body { font-family: 'Plus Jakarta Sans', sans-serif; }
+        .modal-enter { animation: fadeIn 0.2s ease-out forwards; }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: scale(0.95); }
+            to { opacity: 1; transform: scale(1); }
+        }
+        .custom-scrollbar::-webkit-scrollbar { width: 6px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: #0f172a; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #334155; border-radius: 10px; }
+        .glow-emerald { box-shadow: 0 0 20px -5px rgba(16, 185, 129, 0.4); }
     </style>
 </head>
-<body class="bg-slate-950 text-slate-100 font-sans min-h-screen flex flex-col selection:bg-cyan-500 selection:text-slate-950 overflow-x-hidden">
+<body class="bg-slate-950 text-slate-100 min-h-screen selection:bg-emerald-500 selection:text-black flex flex-col">
 
-<!-- HEADER ADMIN -->
-<header class="bg-slate-900/90 border-b border-slate-800/80 backdrop-blur-md sticky top-0 z-40">
-    <div class="max-w-[90rem] mx-auto px-4 sm:px-6 lg:px-8 h-20 flex items-center justify-between">
-        <div class="flex items-center space-x-3">
-            <div class="relative">
-                <img src="/assets/img/logo_alianza_victoriosa_anime.svg" alt="Admin" class="w-11 h-11 glow-cyan rounded-xl">
-                <div class="absolute -bottom-1 -right-1 w-4 h-4 bg-rose-500 border-2 border-slate-900 rounded-full flex items-center justify-center animate-pulse" title="Admin Mode"></div>
-            </div>
+<!-- BARRA DE NAVEGACIÓN (ADMIN) -->
+<nav class="border-b border-slate-800/80 bg-slate-900/50 backdrop-blur-md sticky top-0 z-40">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+        <div class="flex items-center gap-3">
+            <img src="assets/img/logo_alianza_victoriosa_anime.svg" alt="Logo" class="w-10 h-10 glow-emerald rounded-xl bg-slate-950 p-1 border border-slate-800">
             <div>
-                <span class="text-lg font-black tracking-tight text-white block leading-none">VOUCHER<span class="text-cyan-400">ADMIN</span></span>
-                <span class="text-[10px] font-bold text-amber-400 tracking-widest uppercase block mt-0.5">Comité de Finanzas</span>
+                <span class="font-black text-lg tracking-tight text-white block leading-none">VOUCHER<span class="text-emerald-400">CHECK</span></span>
+                <span class="text-[9px] font-bold text-cyan-400 tracking-widest uppercase block mt-0.5">Módulo Administrativo</span>
             </div>
         </div>
-        <div class="flex items-center gap-4">
-            <div class="hidden sm:block text-right mr-2">
-                <p class="text-xs font-bold text-white"><?php echo htmlspecialchars($_SESSION['nombre'] ?? $_SESSION['username']); ?></p>
-                <p class="text-[10px] text-slate-400 font-mono uppercase"><?php echo htmlspecialchars($_SESSION['role'] ?? 'Tesorero'); ?></p>
+
+        <div class="flex items-center gap-3 sm:gap-4">
+            <div class="hidden md:flex flex-col text-right mr-2">
+                <span class="text-xs font-bold text-white"><?php echo htmlspecialchars($nombreAdmin); ?></span>
+                <span class="text-[10px] text-emerald-400 font-bold uppercase">Administrador</span>
             </div>
-            <a href="/auth/logout.php" class="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-slate-800 hover:bg-rose-500/20 text-slate-300 hover:text-rose-400 border border-slate-700 hover:border-rose-500/30 text-xs font-bold transition-all">
+            <a href="auth/logout.php" title="Cerrar Sesión" class="p-2 rounded-xl bg-slate-800/80 hover:bg-rose-500/20 text-slate-400 hover:text-rose-400 border border-slate-700/50 hover:border-rose-500/30 transition-all">
                 <i data-lucide="log-out" class="w-4 h-4"></i>
-                <span>Salir</span>
             </a>
         </div>
     </div>
-</header>
+</nav>
 
-<!-- CONTENIDO PRINCIPAL -->
-<main class="max-w-[90rem] mx-auto px-4 sm:px-6 lg:px-8 py-8 flex-grow w-full">
+<main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 sm:py-10 flex-1 w-full">
 
     <!-- ==========================================
-         MÉTRICAS GLOBALES (KPIs)
+         SECCIÓN 1: TARJETAS DE ESTADÍSTICAS
          ========================================== -->
     <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
-        <!-- Solvente -->
-        <div class="bg-slate-900/80 border border-emerald-500/30 rounded-3xl p-6 backdrop-blur-xl glow-emerald relative overflow-hidden">
-            <div class="absolute -right-4 -top-4 opacity-10"><i data-lucide="trending-up" class="w-32 h-32 text-emerald-500"></i></div>
-            <span class="text-xs font-bold text-emerald-400 uppercase tracking-wider block mb-1">Recaudación Validada</span>
-            <span class="text-3xl font-black text-white block mb-2">Bs. <?php echo number_format($totalValidado, 2, ',', '.'); ?></span>
-            <span class="text-[10px] text-slate-400 bg-slate-950 px-2 py-1 rounded-md border border-slate-800">Total en bóveda del edificio</span>
+
+        <!-- Recaudación Validada -->
+        <div class="bg-slate-900 border border-emerald-500/20 rounded-3xl p-6 relative overflow-hidden shadow-xl shadow-emerald-900/10">
+            <h3 class="text-[11px] font-black uppercase tracking-wider text-emerald-400 mb-2">Recaudación Validada</h3>
+            <div class="text-3xl font-black text-white mb-3">Bs. <?php echo number_format($totalValidado, 2, ',', '.'); ?></div>
+            <span class="inline-block text-[10px] text-slate-400 bg-slate-950 px-3 py-1.5 rounded-lg border border-slate-800">Total en bóveda del edificio</span>
+            <i data-lucide="trending-up" class="absolute -right-4 -bottom-4 w-28 h-28 text-emerald-500/5 rotate-[-15deg]"></i>
         </div>
 
-        <!-- Por Revisar -->
-        <div class="bg-slate-900/80 border border-amber-500/30 rounded-3xl p-6 backdrop-blur-xl glow-amber relative overflow-hidden">
-            <div class="absolute -right-4 -top-4 opacity-10"><i data-lucide="alert-circle" class="w-32 h-32 text-amber-500"></i></div>
-            <span class="text-xs font-bold text-amber-400 uppercase tracking-wider block mb-1">Por Auditar / En Revisión</span>
-            <span class="text-3xl font-black text-white block mb-2">Bs. <?php echo number_format($totalEnRevision, 2, ',', '.'); ?></span>
-            <span class="text-[10px] text-amber-400 bg-amber-500/10 border border-amber-500/20 px-2 py-1 rounded-md">
-                    <i data-lucide="bell" class="w-3 h-3 inline mr-1 -mt-0.5"></i><?php echo $pendientesCount; ?> Vouchers en cola
-                </span>
+        <!-- Por Auditar -->
+        <div class="bg-slate-900 border border-amber-500/20 rounded-3xl p-6 relative overflow-hidden shadow-xl shadow-amber-900/10">
+            <h3 class="text-[11px] font-black uppercase tracking-wider text-amber-400 mb-2">Por Auditar / En Revisión</h3>
+            <div class="text-3xl font-black text-white mb-3">Bs. <?php echo number_format($totalPendiente, 2, ',', '.'); ?></div>
+            <span class="inline-flex items-center gap-1.5 text-[10px] font-bold text-amber-400 bg-amber-500/10 px-3 py-1.5 rounded-lg border border-amber-500/20">
+                <i data-lucide="bell" class="w-3.5 h-3.5"></i> <?php echo $countPendientes; ?> Vouchers en cola
+            </span>
+            <i data-lucide="alert-circle" class="absolute -right-4 -bottom-4 w-28 h-28 text-amber-500/5 rotate-[-15deg]"></i>
         </div>
 
-        <!-- Total Usuarios -->
-        <div class="bg-slate-900/80 border border-cyan-500/30 rounded-3xl p-6 backdrop-blur-xl glow-cyan relative overflow-hidden">
-            <div class="absolute -right-4 -top-4 opacity-10"><i data-lucide="users" class="w-32 h-32 text-cyan-500"></i></div>
-            <span class="text-xs font-bold text-cyan-400 uppercase tracking-wider block mb-1">Residentes Registrados</span>
-            <span class="text-3xl font-black text-white block mb-2"><?php echo $totalUsuarios; ?> <span class="text-sm text-slate-500">Aptos.</span></span>
-            <span class="text-[10px] text-slate-400 bg-slate-950 px-2 py-1 rounded-md border border-slate-800">Comunidad Activa</span>
+        <!-- Residentes -->
+        <div class="bg-slate-900 border border-cyan-500/20 rounded-3xl p-6 relative overflow-hidden shadow-xl shadow-cyan-900/10">
+            <h3 class="text-[11px] font-black uppercase tracking-wider text-cyan-400 mb-2">Residentes Registrados</h3>
+            <div class="text-3xl font-black text-white mb-3"><?php echo $totalUsuarios; ?> <span class="text-lg font-bold text-slate-400">Aptos.</span></div>
+            <span class="inline-block text-[10px] text-slate-400 bg-slate-950 px-3 py-1.5 rounded-lg border border-slate-800">Comunidad Activa</span>
+            <i data-lucide="users" class="absolute -right-4 -bottom-4 w-28 h-28 text-cyan-500/5"></i>
         </div>
     </div>
 
     <!-- ==========================================
-         MÓDULOS DE ADMINISTRACIÓN (ACCESOS RÁPIDOS)
+         SECCIÓN 2: BOTONES DE ACCIÓN RÁPIDA
          ========================================== -->
-    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-10">
 
-        <!-- Gestión de Vecinos -->
-        <a href="/admin_vecinos.php" class="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex items-center gap-4 hover:bg-slate-800/80 hover:border-cyan-500/50 transition-all group shadow-lg">
-            <div class="w-12 h-12 rounded-xl bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 flex items-center justify-center shrink-0 group-hover:scale-110 group-hover:bg-cyan-500 group-hover:text-slate-950 transition-all">
-                <i data-lucide="users" class="w-6 h-6 stroke-[2]"></i>
+        <a href="gestion_vecinos.php" class="bg-slate-900/80 border border-slate-800 hover:border-cyan-500/50 rounded-2xl p-4 flex items-center gap-4 transition-all group hover:bg-slate-900">
+            <div class="w-12 h-12 rounded-xl bg-slate-950 border border-slate-800 flex items-center justify-center text-cyan-400 group-hover:bg-cyan-500/10 transition-colors">
+                <i data-lucide="users" class="w-6 h-6"></i>
             </div>
             <div>
-                <h4 class="text-sm font-bold text-white tracking-wide">Gestión de Vecinos</h4>
-                <p class="text-[10px] text-slate-400 mt-0.5">Crear, editar o suspender cuentas</p>
+                <h4 class="font-bold text-white text-sm">Gestión de Vecinos</h4>
+                <p class="text-[10px] text-slate-500">Crear, editar o suspender cuentas</p>
             </div>
         </a>
 
-        <!-- Reportes Financieros -->
-        <a href="/admin_reportes.php" class="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex items-center gap-4 hover:bg-slate-800/80 hover:border-emerald-500/50 transition-all group shadow-lg">
-            <div class="w-12 h-12 rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center justify-center shrink-0 group-hover:scale-110 group-hover:bg-emerald-500 group-hover:text-slate-950 transition-all">
-                <i data-lucide="bar-chart-3" class="w-6 h-6 stroke-[2]"></i>
+        <a href="reportes.php" class="bg-slate-900/80 border border-slate-800 hover:border-emerald-500/50 rounded-2xl p-4 flex items-center gap-4 transition-all group hover:bg-slate-900">
+            <div class="w-12 h-12 rounded-xl bg-slate-950 border border-slate-800 flex items-center justify-center text-emerald-400 group-hover:bg-emerald-500/10 transition-colors">
+                <i data-lucide="bar-chart-2" class="w-6 h-6"></i>
             </div>
             <div>
-                <h4 class="text-sm font-bold text-white tracking-wide">Reportes y Cierres</h4>
-                <p class="text-[10px] text-slate-400 mt-0.5">Generar PDF y métricas mensuales</p>
+                <h4 class="font-bold text-white text-sm">Reportes y Cierres</h4>
+                <p class="text-[10px] text-slate-500">Generar PDF y métricas mensuales</p>
             </div>
         </a>
 
-        <!-- Ajustes del Portal -->
-        <a href="/admin_ajustes.php" class="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex items-center gap-4 hover:bg-slate-800/80 hover:border-blue-500/50 transition-all group shadow-lg">
-            <div class="w-12 h-12 rounded-xl bg-blue-500/10 text-blue-400 border border-blue-500/20 flex items-center justify-center shrink-0 group-hover:scale-110 group-hover:bg-blue-500 group-hover:text-slate-950 transition-all">
-                <i data-lucide="settings" class="w-6 h-6 stroke-[2]"></i>
+        <a href="admin_ajustes.php" class="bg-slate-900/80 border border-slate-800 hover:border-blue-500/50 rounded-2xl p-4 flex items-center gap-4 transition-all group hover:bg-slate-900">
+            <div class="w-12 h-12 rounded-xl bg-slate-950 border border-slate-800 flex items-center justify-center text-blue-400 group-hover:bg-blue-500/10 transition-colors">
+                <i data-lucide="settings" class="w-6 h-6"></i>
             </div>
             <div>
-                <h4 class="text-sm font-bold text-white tracking-wide">Ajustes de Portal</h4>
-                <p class="text-[10px] text-slate-400 mt-0.5">Configurar cuotas, bancos y roles</p>
+                <h4 class="font-bold text-white text-sm">Ajustes de Portal</h4>
+                <p class="text-[10px] text-slate-500">Configurar cuotas, bancos y roles</p>
             </div>
         </a>
 
     </div>
 
     <!-- ==========================================
-         BARRA DE HERRAMIENTAS (Filtros y Calendario)
+         SECCIÓN 3: TABLA DE PAGOS PENDIENTES
          ========================================== -->
-    <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4 mb-6 flex flex-col sm:flex-row justify-between items-center gap-4 shadow-lg">
-
-        <!-- Buscador / Filtro por Banco o Referencia -->
-        <form action="" method="GET" class="w-full sm:w-auto flex gap-2">
-            <div class="relative w-full sm:w-72">
-                <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-500"><i data-lucide="search" class="w-4 h-4"></i></div>
-                <input type="text" name="banco" value="<?php echo htmlspecialchars($filtroBanco); ?>" placeholder="Buscar Banco o N° Referencia..." class="w-full pl-9 pr-3 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-white text-xs focus:outline-none focus:border-cyan-400 transition-all">
-            </div>
-            <button type="submit" class="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-bold transition-all flex items-center gap-2">
-                <span>Filtrar</span>
-            </button>
-            <?php if(!empty($filtroBanco)): ?>
-                <a href="/dashboard.php" class="px-3 py-2.5 bg-rose-500/10 text-rose-400 rounded-xl border border-rose-500/20 hover:bg-rose-500 hover:text-white text-xs font-bold transition-all flex items-center" title="Limpiar Filtro">
-                    <i data-lucide="x" class="w-4 h-4"></i>
-                </a>
-            <?php endif; ?>
-        </form>
-
-        <!-- Botón para abrir el Modal del Calendario -->
-        <button onclick="openModal('modalCalendario')" class="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-gradient-to-r from-cyan-500 to-emerald-400 text-slate-950 font-extrabold text-xs glow-cyan hover:scale-[1.02] transition-all flex items-center justify-center gap-2 shadow-lg">
-            <i data-lucide="calendar-days" class="w-4 h-4 stroke-[2.5]"></i>
-            <span>Ver Calendario de Cobros</span>
-        </button>
-    </div>
-
-    <!-- ==========================================
-         TABLA CENTRAL DE AUDITORÍA
-         ========================================== -->
-    <div class="bg-slate-900/80 border border-slate-800 rounded-3xl p-6 backdrop-blur-xl shadow-xl">
-        <div class="mb-6 pb-4 border-b border-slate-800 flex justify-between items-end">
+    <div class="bg-slate-900/60 border border-slate-800/80 rounded-2xl overflow-hidden shadow-2xl backdrop-blur-sm mb-8">
+        <div class="p-6 border-b border-slate-800/80 flex items-center justify-between bg-slate-900/90">
             <div>
-                <h2 class="text-lg font-black text-white flex items-center gap-2"><i data-lucide="clipboard-list" class="w-5 h-5 text-cyan-400"></i>Centro de Auditoría Comunal</h2>
-                <p class="text-xs text-slate-400">Supervisa, aprueba o rechaza los reportes de pago de los residentes.</p>
+                <h2 class="text-base font-extrabold text-white flex items-center gap-2">
+                    <i data-lucide="clipboard-list" class="w-5 h-5 text-emerald-400"></i> Auditoría de Comprobantes
+                </h2>
+                <p class="text-xs text-slate-400 mt-0.5">Revisa el soporte digital y aprueba o rechaza las transacciones.</p>
             </div>
         </div>
 
-        <div class="overflow-x-auto no-scrollbar pb-16">
-            <table class="w-full text-left border-collapse whitespace-nowrap">
+        <div class="overflow-x-auto">
+            <table class="w-full text-left border-collapse">
                 <thead>
-                <tr class="border-b border-slate-800 text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                    <th class="py-3 px-4">Residente</th>
-                    <th class="py-3 px-4">Ref. / Banco</th>
-                    <th class="py-3 px-4">Fecha Pago</th>
-                    <th class="py-3 px-4">Monto (Bs.)</th>
-                    <th class="py-3 px-4">Estado</th>
-                    <th class="py-3 px-4 text-center">Soporte</th>
-                    <th class="py-3 px-4 text-right">Acciones</th>
+                <tr class="border-b border-slate-800/80 bg-slate-950 text-[11px] font-extrabold uppercase tracking-wider text-slate-400">
+                    <th class="py-4 px-4">N° Rastreo / Fecha</th>
+                    <th class="py-4 px-4">Residente</th>
+                    <th class="py-4 px-4">Método y Ref.</th>
+                    <th class="py-4 px-4">Monto</th>
+                    <th class="py-4 px-4 text-center">Soporte</th>
+                    <th class="py-4 px-4 text-right">Acción</th>
                 </tr>
                 </thead>
                 <tbody class="divide-y divide-slate-800/60 text-xs text-slate-300 font-medium">
-                <?php if (count($pagos) > 0): ?>
-                    <?php foreach ($pagos as $pago):
-                        $idStr  = (string)$pago['_id'];
-                        $estado = strtolower(trim($pago['estado'] ?? $pago['estatus'] ?? 'en revisión'));
+                <?php if (empty($pagosPendientes)): ?>
+                    <tr>
+                        <td colspan="6" class="py-12 text-center text-slate-500">
+                            <i data-lucide="check-circle-2" class="w-12 h-12 mx-auto mb-3 text-emerald-500/50"></i>
+                            <p class="font-bold text-sm text-white">¡Todo al día!</p>
+                            <p class="text-xs mt-1">No hay pagos pendientes de auditoría en este momento.</p>
+                        </td>
+                    </tr>
+                <?php else: ?>
+                    <?php foreach ($pagosPendientes as $pago): ?>
+                        <?php
+                        $idPagoStr = (string)$pago['_id'];
+                        $rastreo = $pago['numero_rastreo'] ?? 'S/N';
 
-                        $fecha  = "N/A";
-                        if (!empty($pago['fecha_pago'])) $fecha = $pago['fecha_pago'];
-                        elseif (!empty($pago['fecha_declaracion']) && $pago['fecha_declaracion'] instanceof MongoDB\BSON\UTCDateTime) $fecha = $pago['fecha_declaracion']->toDateTime()->format('d/m/Y');
-                        elseif (!empty($pago['created_at']) && $pago['created_at'] instanceof MongoDB\BSON\UTCDateTime) $fecha = $pago['created_at']->toDateTime()->format('d/m/Y');
-
-                        $monto  = floatval((string)($pago['monto'] ?? 0));
-                        $banco  = $pago['banco'] ?? $pago['plataforma'] ?? $pago['metodo_pago'] ?? 'S/R';
-                        $referencia = $pago['referencia'] ?? $pago['referencia_bancaria'] ?? 'N/A';
-
-                        $claseBadge = 'bg-amber-500/10 text-amber-400 border-amber-500/20 animate-pulse';
-                        if (in_array($estado, ['aprobado', 'validado', 'solvente'])) {
-                            $claseBadge = 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20';
-                        } elseif ($estado === 'rechazado') {
-                            $claseBadge = 'bg-rose-500/10 text-rose-400 border-rose-500/20';
+                        $fecha = "N/A";
+                        if (!empty($pago['fecha_pago'])) {
+                            $fechaObj = date_create($pago['fecha_pago']);
+                            $fecha = $fechaObj ? date_format($fechaObj, 'd/m/Y') : $pago['fecha_pago'];
+                        } elseif (!empty($pago['fecha_declaracion']) && $pago['fecha_declaracion'] instanceof MongoDB\BSON\UTCDateTime) {
+                            $fecha = $pago['fecha_declaracion']->toDateTime()->format('d/m/Y');
                         }
+
+                        $montoVal = floatval((string)($pago['monto'] ?? 0));
+                        $metodo = $pago['metodo_pago'] ?? 'Digital';
+                        $monedaStr = (in_array(strtolower($metodo), ['zelle', 'paypal'])) ? '$' : 'Bs.';
+
+                        // Residente info (Intentamos obtenerlo del pago, sino fallback a "Residente")
+                        $residenteName = $pago['nombre_residente'] ?? $pago['nombre'] ?? 'Residente';
+                        $residenteApto = $pago['apto'] ?? $pago['departamento'] ?? 'S/A';
+                        $urlSoporte = $pago['soporte_url'] ?? $pago['archivo'] ?? null;
                         ?>
                         <tr class="hover:bg-slate-800/40 transition-colors">
-                            <td class="py-3.5 px-4">
-                                <span class="font-bold text-white block"><?php echo htmlspecialchars($pago['nombre'] ?? 'Vecino'); ?></span>
-                                <span class="text-[9px] text-slate-500 font-mono">C.I: <?php echo htmlspecialchars($pago['cedula'] ?? $pago['cedula_vecino'] ?? 'N/A'); ?></span>
+                            <td class="py-4 px-4">
+                                <span class="font-mono font-black text-cyan-400 text-xs bg-cyan-500/10 px-2 py-1 rounded-md border border-cyan-500/20 block w-max mb-1">
+                                    <?php echo htmlspecialchars($rastreo); ?>
+                                </span>
+                                <span class="text-[10px] text-slate-500"><i data-lucide="calendar" class="w-3 h-3 inline"></i> <?php echo htmlspecialchars($fecha); ?></span>
                             </td>
-                            <td class="py-3.5 px-4">
-                                <span class="font-bold text-white block font-mono tracking-widest text-cyan-300"><?php echo htmlspecialchars($referencia); ?></span>
-                                <span class="text-[10px] text-slate-500 uppercase truncate max-w-[180px] block" title="<?php echo htmlspecialchars($banco); ?>"><?php echo htmlspecialchars($banco); ?></span>
+                            <td class="py-4 px-4">
+                                <span class="block font-bold text-white"><?php echo htmlspecialchars($residenteName); ?></span>
+                                <span class="text-[10px] text-slate-400">Apto: <strong class="text-cyan-400"><?php echo htmlspecialchars($residenteApto); ?></strong></span>
                             </td>
-                            <td class="py-3.5 px-4 text-slate-400"><?php echo htmlspecialchars($fecha); ?></td>
-                            <td class="py-3.5 px-4 font-black text-white">Bs. <?php echo number_format($monto, 2, ',', '.'); ?></td>
-                            <td class="py-3.5 px-4">
-                                    <span class="px-2.5 py-1 rounded-full text-[9px] font-black uppercase tracking-widest border inline-block <?php echo $claseBadge; ?>">
-                                        <?php echo htmlspecialchars($pago['estado'] ?? $pago['estatus'] ?? 'En Revisión'); ?>
-                                    </span>
+                            <td class="py-4 px-4">
+                                <span class="block font-mono font-bold text-white"><?php echo htmlspecialchars($pago['referencia_bancaria'] ?? $pago['referencia'] ?? 'S/R'); ?></span>
+                                <span class="text-[10px] text-slate-500 uppercase">
+                                    <?php echo htmlspecialchars(str_replace('_', ' ', $metodo)); ?>
+                                    <?php if(!empty($pago['banco_origen'])) echo " - " . htmlspecialchars($pago['banco_origen']); ?>
+                                </span>
                             </td>
-                            <td class="py-3.5 px-4 text-center">
-                                <?php
-                                $urlSoporte = $pago['soporte_url'] ?? $pago['archivo'] ?? null;
-                                if ($urlSoporte && !str_starts_with($urlSoporte, '/uploads/') && !str_starts_with($urlSoporte, 'http')) {
-                                    $urlSoporte = '/uploads/vouchers/' . $urlSoporte;
-                                }
-                                if ($urlSoporte):
-                                    ?>
-                                    <a href="<?php echo htmlspecialchars($urlSoporte); ?>" target="_blank" class="inline-flex items-center justify-center w-8 h-8 rounded-lg bg-slate-950 border border-slate-700 hover:border-cyan-400 hover:text-cyan-400 transition-all shadow" title="Ver Comprobante">
+                            <td class="py-4 px-4 font-black text-white text-sm">
+                                <?php echo $monedaStr; ?> <?php echo number_format($montoVal, 2, ',', '.'); ?>
+                            </td>
+                            <td class="py-4 px-4 text-center">
+                                <?php if ($urlSoporte): ?>
+                                    <a href="<?php echo htmlspecialchars($urlSoporte); ?>" target="_blank" class="inline-flex items-center justify-center p-2 bg-slate-800 hover:bg-slate-700 text-cyan-400 rounded-lg border border-slate-700 transition-all" title="Ver Comprobante">
                                         <i data-lucide="image" class="w-4 h-4"></i>
                                     </a>
                                 <?php else: ?>
-                                    <span class="text-slate-600 text-[10px]">N/A</span>
+                                    <span class="text-[10px] text-rose-400 bg-rose-500/10 px-2 py-1 rounded border border-rose-500/20">Sin Soporte</span>
                                 <?php endif; ?>
                             </td>
-                            <td class="py-3.5 px-4 text-right">
-                                <?php if ($estado === 'en revisión' || $estado === 'pendiente'): ?>
-                                    <div class="flex items-center justify-end gap-2">
-                                        <!-- Botón Aprobar -->
-                                        <button onclick="confirmAction('aprobar', '<?php echo $idStr; ?>')" class="px-3 py-1.5 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 hover:bg-emerald-500 hover:text-slate-950 font-bold transition-all flex items-center gap-1.5 shadow">
-                                            <i data-lucide="check" class="w-3.5 h-3.5 stroke-[3]"></i> Aprobar
-                                        </button>
-                                        <!-- Botón Rechazar -->
-                                        <button onclick="confirmAction('rechazar', '<?php echo $idStr; ?>')" class="px-3 py-1.5 rounded-lg bg-rose-500/10 text-rose-400 border border-rose-500/20 hover:bg-rose-500 hover:text-slate-950 font-bold transition-all flex items-center gap-1.5 shadow">
-                                            <i data-lucide="x" class="w-3.5 h-3.5 stroke-[3]"></i> Rechazar
-                                        </button>
-                                    </div>
-                                <?php else: ?>
-                                    <span class="text-[10px] text-slate-500 italic">Auditado</span>
-                                <?php endif; ?>
+                            <td class="py-4 px-4 text-right">
+                                <div class="flex items-center justify-end gap-2">
+                                    <!-- BOTÓN APROBAR -->
+                                    <button type="button" onclick="aprobarPago('<?php echo $idPagoStr; ?>', '<?php echo $rastreo; ?>')" title="Aprobar Pago" class="p-2 rounded-xl bg-emerald-500/10 hover:bg-emerald-500 text-emerald-400 hover:text-slate-950 transition-all border border-emerald-500/30 font-bold flex items-center gap-1 text-[11px] uppercase tracking-wider">
+                                        <i data-lucide="check" class="w-4 h-4"></i> Validar
+                                    </button>
+
+                                    <!-- BOTÓN RECHAZAR -->
+                                    <button type="button" onclick="abrirModalRechazoAdmin('<?php echo $idPagoStr; ?>', '<?php echo $rastreo; ?>')" title="Rechazar Pago" class="p-2 rounded-xl bg-rose-500/10 hover:bg-rose-500 text-rose-400 hover:text-white transition-all border border-rose-500/30">
+                                        <i data-lucide="x" class="w-4 h-4"></i>
+                                    </button>
+                                </div>
                             </td>
                         </tr>
                     <?php endforeach; ?>
-                <?php else: ?>
-                    <tr>
-                        <td colspan="7" class="py-12 text-center">
-                            <i data-lucide="shield-check" class="w-12 h-12 text-slate-700 mx-auto mb-3"></i>
-                            <p class="text-slate-400 font-bold">No hay pagos registrados bajo este criterio.</p>
-                        </td>
-                    </tr>
                 <?php endif; ?>
                 </tbody>
             </table>
@@ -352,126 +277,130 @@ foreach ($pagos as $pago) {
 </main>
 
 <!-- ==========================================
-     MODAL: CALENDARIO DE COBROS (VISUAL PHP)
-     ========================================== -->
-<div id="modalCalendario" class="fixed inset-0 z-50 bg-slate-950/90 backdrop-blur-md flex items-center justify-center p-4 hidden">
-    <div class="bg-slate-900 border border-slate-800 rounded-3xl max-w-6xl w-full p-6 sm:p-8 relative overflow-hidden shadow-2xl animate-modal flex flex-col h-[85vh]">
-        <div class="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-cyan-500 via-teal-400 to-emerald-400"></div>
+     MODAL DEL ADMIN PARA RECHAZAR EL PAGO
+========================================== -->
+<div id="modalRechazarAdmin" class="fixed inset-0 z-[100] hidden items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+    <div class="bg-slate-900 border border-rose-500/30 rounded-3xl max-w-md w-full overflow-hidden shadow-2xl relative modal-enter">
+        <div class="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-orange-500 to-rose-500 z-10"></div>
 
-        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6 shrink-0">
+        <div class="p-5 border-b border-slate-800/80 flex items-center justify-between bg-slate-900 z-10">
             <div>
-                <h3 class="text-2xl font-black text-white flex items-center gap-2">
-                    <i data-lucide="calendar-check" class="w-6 h-6 text-cyan-400"></i>
-                    Calendario de Cobros
+                <h3 class="text-base font-extrabold text-white flex items-center gap-2">
+                    <i data-lucide="alert-triangle" class="w-5 h-5 text-rose-400"></i> Rechazar Pago
                 </h3>
-                <p class="text-xs font-bold text-slate-400 uppercase tracking-widest mt-1">
-                    MES ACTUAL: <span class="text-cyan-400"><?php echo strtoupper(date('F Y')); ?></span>
-                </p>
+                <p class="text-xs text-slate-400 mt-0.5">Rastreo: <strong id="txtRastreoRechazo" class="text-white"></strong></p>
+            </div>
+            <button type="button" onclick="cerrarModalRechazoAdmin()" class="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition-colors">
+                <i data-lucide="x" class="w-5 h-5"></i>
+            </button>
+        </div>
+
+        <form id="formRechazarPagoAdmin" class="flex flex-col">
+            <input type="hidden" name="pago_id" id="inputRechazoPagoId">
+
+            <div class="p-6 space-y-5">
+                <div>
+                    <label class="block text-xs font-bold text-slate-400 uppercase mb-2">Motivo del Rechazo <span class="text-rose-500">*</span></label>
+                    <textarea name="motivo_rechazo" required rows="3" placeholder="Ej: La transferencia no se reflejó en la cuenta del condominio o el monto es incorrecto." class="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-rose-500 resize-none"></textarea>
+                    <p class="text-[10px] text-slate-500 mt-1">Este mensaje se enviará por correo al residente.</p>
+                </div>
+
+                <div>
+                    <label class="block text-xs font-bold text-slate-400 uppercase mb-2">Adjuntar Evidencia (Opcional)</label>
+                    <div class="relative border-2 border-dashed border-slate-700 hover:border-rose-500/50 rounded-xl p-4 text-center transition-all bg-slate-950 text-slate-400 hover:text-rose-400">
+                        <input type="file" name="imagen_evidencia" accept="image/jpeg, image/png, image/webp" class="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10" onchange="document.getElementById('fileNameEvidencia').innerText = this.files[0].name;">
+                        <div class="flex flex-col items-center justify-center gap-1 pointer-events-none">
+                            <i data-lucide="image-plus" class="w-5 h-5 mb-1"></i>
+                            <span id="fileNameEvidencia" class="text-xs font-semibold">Subir captura de pantalla (JPG/PNG)</span>
+                        </div>
+                    </div>
+                </div>
             </div>
 
-            <div class="flex items-center gap-4">
-                <div class="flex items-center gap-3 text-[10px] font-bold uppercase tracking-wider text-slate-400 bg-slate-950 px-4 py-2 rounded-xl border border-slate-800">
-                    <span class="flex items-center gap-1.5"><div class="w-2.5 h-2.5 rounded-full bg-emerald-500"></div> Validado</span>
-                    <span class="flex items-center gap-1.5"><div class="w-2.5 h-2.5 rounded-full bg-amber-500"></div> Revisión</span>
-                </div>
-                <button type="button" onclick="closeModal('modalCalendario')" class="p-2 rounded-xl bg-slate-800 text-slate-400 hover:text-white hover:bg-rose-500 transition-colors">
-                    <i data-lucide="x" class="w-5 h-5"></i>
+            <div class="p-4 bg-slate-950 border-t border-slate-800 flex gap-3">
+                <button type="button" onclick="cerrarModalRechazoAdmin()" class="w-1/3 py-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs transition-all">Cancelar</button>
+                <button type="submit" id="btnProcesarRechazo" class="w-2/3 py-3 rounded-xl bg-rose-500 hover:bg-rose-600 text-white font-extrabold text-xs shadow-lg transition-all flex items-center justify-center gap-2">
+                    <i data-lucide="send" class="w-4 h-4"></i> Procesar y Notificar
                 </button>
             </div>
-        </div>
-
-        <div class="flex-grow overflow-y-auto pr-2 no-scrollbar">
-            <div class="grid grid-cols-7 gap-2 mb-2 text-center sticky top-0 bg-slate-900 z-10 py-2">
-                <?php
-                $diasSemana = ['DOM', 'LUN', 'MAR', 'MIÉ', 'JUE', 'VIE', 'SÁB'];
-                foreach($diasSemana as $d) echo "<div class='text-[10px] font-black text-slate-500 uppercase tracking-widest'>$d</div>";
-                ?>
-            </div>
-
-            <div class="grid grid-cols-7 gap-2 pb-4">
-                <?php
-                $primerDiaMes = mktime(0,0,0, date('m'), 1, date('Y'));
-                $diasEnMes = date('t', $primerDiaMes);
-                $diaSemanaInicio = date('w', $primerDiaMes); // 0 (Dom) a 6 (Sab)
-
-                for ($i = 0; $i < $diaSemanaInicio; $i++) {
-                    echo "<div class='min-h-[100px] bg-transparent border border-dashed border-slate-800/50 rounded-2xl'></div>";
-                }
-
-                $diaActual = (int)date('d');
-                for ($dia = 1; $dia <= $diasEnMes; $dia++) {
-                    $esHoy = ($dia === $diaActual) ? 'border-cyan-500/50 bg-cyan-950/20 shadow-[0_0_15px_rgba(0,242,254,0.1)]' : 'border-slate-800 bg-slate-950';
-                    $textoDia = ($dia === $diaActual) ? 'text-cyan-400 font-black' : 'text-slate-400 font-bold';
-
-                    echo "<div class='min-h-[120px] p-2 rounded-2xl border flex flex-col transition-colors hover:border-slate-600 $esHoy'>";
-                    echo "<span class='text-xs block mb-2 $textoDia'>$dia</span>";
-
-                    echo "<div class='flex flex-col gap-1.5 overflow-y-auto no-scrollbar flex-grow'>";
-                    if (isset($pagosPorDia[$dia])) {
-                        foreach ($pagosPorDia[$dia] as $p) {
-                            $colorPildora = (in_array($p['estado'], ['aprobado', 'validado', 'solvente']))
-                                    ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
-                                    : 'bg-amber-500/10 text-amber-400 border border-amber-500/20';
-
-                            $primerNombre = explode(' ', trim($p['nombre']))[0];
-
-                            echo "<div class='text-[9px] font-bold px-1.5 py-1 rounded-md flex items-center gap-1.5 truncate $colorPildora' title='{$p['nombre']} - {$p['estado']}'>";
-                            echo "<i data-lucide='banknote' class='w-2.5 h-2.5 shrink-0'></i> <span class='truncate'>$primerNombre</span>";
-                            echo "</div>";
-                        }
-                    }
-                    echo "</div></div>";
-                }
-                ?>
-            </div>
-        </div>
-
+        </form>
     </div>
 </div>
 
-<!-- SCRIPTS -->
 <script>
     lucide.createIcons();
 
-    function openModal(id) { document.getElementById(id).classList.remove('hidden'); }
-    function closeModal(id) { document.getElementById(id).classList.add('hidden'); }
+    // ===============================================
+    // LÓGICA DE APROBACIÓN RÁPIDA (Fetch)
+    // ===============================================
+    async function aprobarPago(idPago, rastreo) {
+        if (!confirm(`¿Estás seguro de que deseas VALIDAR el pago N° ${rastreo}?`)) return;
 
-    window.addEventListener('click', function(e) {
-        if (e.target.id === 'modalCalendario') closeModal('modalCalendario');
-    });
-
-    // Mock para las acciones (Esto lo conectaremos a la API de auditoría después)
-    async function confirmAction(action, id) {
-        const accionTexto = action === 'aprobar' ? 'APROBAR' : 'RECHAZAR';
-
-        if(confirm(`¿Estás seguro de que deseas ${accionTexto} este comprobante NoSQL?`)) {
-            try {
-                // Hacemos la petición a tu archivo existente
-                const response = await fetch('aprobar_pago.php', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    // Enviamos los datos como un objeto JSON
-                    body: JSON.stringify({
-                        id: id,
-                        accion: action
-                    })
-                });
-
-                const data = await response.json();
-
-                if (data.status === 'success') {
-                    // Recargar la página automáticamente para ver reflejado el cambio
-                    window.location.reload();
-                } else {
-                    alert('Error: ' + data.message);
-                }
-            } catch (error) {
-                alert('Ocurrió un error al intentar comunicarse con el servidor.');
+        try {
+            const response = await fetch('api_aprobar_pago.php', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: new URLSearchParams({ 'pago_id': idPago })
+            });
+            const data = await response.json();
+            if (data.status === 'success') {
+                alert('✅ Pago validado correctamente.');
+                window.location.reload();
+            } else {
+                alert('❌ Error: ' + (data.message || 'No se pudo aprobar.'));
             }
+        } catch (error) {
+            alert('❌ Error de conexión al intentar aprobar.');
         }
     }
+
+    // ===============================================
+    // LÓGICA DE RECHAZO CON MODAL
+    // ===============================================
+    const modalRechazarAdmin = document.getElementById('modalRechazarAdmin');
+
+    function abrirModalRechazoAdmin(idPago, rastreo) {
+        document.getElementById('inputRechazoPagoId').value = idPago;
+        document.getElementById('txtRastreoRechazo').innerText = rastreo;
+        modalRechazarAdmin.classList.remove('hidden');
+        modalRechazarAdmin.classList.add('flex');
+    }
+
+    function cerrarModalRechazoAdmin() {
+        modalRechazarAdmin.classList.add('hidden');
+        modalRechazarAdmin.classList.remove('flex');
+        document.getElementById('formRechazarPagoAdmin').reset();
+        document.getElementById('fileNameEvidencia').innerText = 'Subir captura de pantalla (JPG/PNG)';
+    }
+
+    // Enviar el formulario de rechazo
+    document.getElementById('formRechazarPagoAdmin').addEventListener('submit', async function(e) {
+        e.preventDefault();
+
+        const btn = document.getElementById('btnProcesarRechazo');
+        const txtOriginal = btn.innerHTML;
+        btn.innerHTML = `<svg class="animate-spin -ml-1 mr-2 h-4 w-4 text-white inline" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg> Procesando...`;
+        btn.disabled = true;
+
+        const formData = new FormData(this);
+
+        try {
+            const response = await fetch('api_rechazar_pago.php', { method: 'POST', body: formData });
+            const data = await response.json();
+
+            if (data.status === 'success') {
+                alert('✅ ' + data.message);
+                window.location.reload();
+            } else {
+                alert('❌ Error: ' + (data.message || 'Fallo interno.'));
+                btn.innerHTML = txtOriginal; btn.disabled = false;
+            }
+        } catch (error) {
+            alert('❌ Error de red al procesar.');
+            btn.innerHTML = txtOriginal; btn.disabled = false;
+        }
+    });
+
 </script>
 </body>
 </html>
