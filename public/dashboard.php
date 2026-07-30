@@ -12,7 +12,8 @@ if (!isset($_SESSION['user_id']) || !in_array($rol, ['admin', 'superuser'])) {
     exit();
 }
 
-require __DIR__ . '/config/db.php';
+// ÚNICA LLAMADA NECESARIA: Esto conecta a la BD y carga Composer automáticamente
+require_once __DIR__ . '/config/db.php';
 
 $nombreAdmin = $_SESSION['nombre'] ?? $_SESSION['username'] ?? 'Administrador';
 
@@ -27,7 +28,7 @@ $countPendientes = 0;
 $pagosPendientes = [];
 
 foreach ($todosLosPagosCursor as $pago) {
-    // Normalizamos el estatus para evitar problemas de mayúsculas, minúsculas o espacios
+    // Normalizamos el estatus para evitar problemas de mayúsculas/minúsculas
     $est = strtolower(trim($pago['estado'] ?? $pago['estatus'] ?? 'en revisión'));
     $monto = floatval((string)($pago['monto'] ?? 0));
 
@@ -36,7 +37,7 @@ foreach ($todosLosPagosCursor as $pago) {
     } elseif (in_array($est, ['en revisión', 'pendiente', 'verificando', 'revision'])) {
         $totalPendiente += $monto;
         $countPendientes++;
-        // Guardamos los que están en revisión en un array para usarlos en la tabla de abajo
+        // Guardamos los que están en revisión en un array para usarlos en la tabla
         $pagosPendientes[] = $pago;
     }
 }
@@ -46,7 +47,6 @@ $totalUsuarios = $db->usuarios->countDocuments(['role' => ['$ne' => 'admin']]);
 if ($totalUsuarios == 0) {
     $totalUsuarios = $db->usuarios->countDocuments([]); // Fallback si no hay distincion de roles
 }
-
 ?>
 <!DOCTYPE html>
 <html lang="es" class="dark">
@@ -134,7 +134,7 @@ if ($totalUsuarios == 0) {
          ========================================== -->
     <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-10">
 
-        <a href="gestion_vecinos.php" class="bg-slate-900/80 border border-slate-800 hover:border-cyan-500/50 rounded-2xl p-4 flex items-center gap-4 transition-all group hover:bg-slate-900">
+        <a href="admin_vecinos.php" class="bg-slate-900/80 border border-slate-800 hover:border-cyan-500/50 rounded-2xl p-4 flex items-center gap-4 transition-all group hover:bg-slate-900">
             <div class="w-12 h-12 rounded-xl bg-slate-950 border border-slate-800 flex items-center justify-center text-cyan-400 group-hover:bg-cyan-500/10 transition-colors">
                 <i data-lucide="users" class="w-6 h-6"></i>
             </div>
@@ -144,7 +144,7 @@ if ($totalUsuarios == 0) {
             </div>
         </a>
 
-        <a href="reportes.php" class="bg-slate-900/80 border border-slate-800 hover:border-emerald-500/50 rounded-2xl p-4 flex items-center gap-4 transition-all group hover:bg-slate-900">
+        <a href="admin_reportes.php" class="bg-slate-900/80 border border-slate-800 hover:border-emerald-500/50 rounded-2xl p-4 flex items-center gap-4 transition-all group hover:bg-slate-900">
             <div class="w-12 h-12 rounded-xl bg-slate-950 border border-slate-800 flex items-center justify-center text-emerald-400 group-hover:bg-emerald-500/10 transition-colors">
                 <i data-lucide="bar-chart-2" class="w-6 h-6"></i>
             </div>
@@ -218,7 +218,6 @@ if ($totalUsuarios == 0) {
                         $metodo = $pago['metodo_pago'] ?? 'Digital';
                         $monedaStr = (in_array(strtolower($metodo), ['zelle', 'paypal'])) ? '$' : 'Bs.';
 
-                        // Residente info (Intentamos obtenerlo del pago, sino fallback a "Residente")
                         $residenteName = $pago['nombre_residente'] ?? $pago['nombre'] ?? 'Residente';
                         $residenteApto = $pago['apto'] ?? $pago['departamento'] ?? 'S/A';
                         $urlSoporte = $pago['soporte_url'] ?? $pago['archivo'] ?? null;
@@ -255,12 +254,10 @@ if ($totalUsuarios == 0) {
                             </td>
                             <td class="py-4 px-4 text-right">
                                 <div class="flex items-center justify-end gap-2">
-                                    <!-- BOTÓN APROBAR -->
                                     <button type="button" onclick="aprobarPago('<?php echo $idPagoStr; ?>', '<?php echo $rastreo; ?>')" title="Aprobar Pago" class="p-2 rounded-xl bg-emerald-500/10 hover:bg-emerald-500 text-emerald-400 hover:text-slate-950 transition-all border border-emerald-500/30 font-bold flex items-center gap-1 text-[11px] uppercase tracking-wider">
                                         <i data-lucide="check" class="w-4 h-4"></i> Validar
                                     </button>
 
-                                    <!-- BOTÓN RECHAZAR -->
                                     <button type="button" onclick="abrirModalRechazoAdmin('<?php echo $idPagoStr; ?>', '<?php echo $rastreo; ?>')" title="Rechazar Pago" class="p-2 rounded-xl bg-rose-500/10 hover:bg-rose-500 text-rose-400 hover:text-white transition-all border border-rose-500/30">
                                         <i data-lucide="x" class="w-4 h-4"></i>
                                     </button>

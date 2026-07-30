@@ -537,29 +537,32 @@ foreach ($pagos as $p) {
 
             <!-- PASO 2: DATOS DEL PAGO -->
             <div id="paso2" class="space-y-4 hidden">
-
                 <div id="campoBanco">
                     <label class="block text-xs font-bold text-slate-400 uppercase mb-1">Banco de Origen</label>
                     <select name="banco_origen" id="inputBanco" required class="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-cyan-500 font-semibold appearance-none">
                         <option value="">Selecciona tu banco...</option>
-                        <option value="100% Banco">100% Banco</option>
-                        <option value="Bancamiga">Bancamiga</option>
-                        <option value="Bancaribe">Bancaribe</option>
-                        <option value="Banco Activo">Banco Activo</option>
-                        <option value="Banco Bicentenario">Banco Bicentenario</option>
-                        <option value="Banco Caroní">Banco Caroní</option>
-                        <option value="Banco de Venezuela (BDV)">Banco de Venezuela (BDV)</option>
-                        <option value="Banco del Tesoro">Banco del Tesoro</option>
-                        <option value="Banco Exterior">Banco Exterior</option>
-                        <option value="Banco Mercantil">Banco Mercantil</option>
-                        <option value="Banco Nacional de Crédito (BNC)">Banco Nacional de Crédito (BNC)</option>
-                        <option value="Banco Plaza">Banco Plaza</option>
-                        <option value="Banco Provincial">Banco Provincial</option>
-                        <option value="Banco Venezolano de Crédito">Banco Venezolano de Crédito</option>
-                        <option value="Banesco">Banesco</option>
-                        <option value="Banplus">Banplus</option>
-                        <option value="BFC Banco Fondo Común">BFC Banco Fondo Común</option>
-                        <option value="Otros">Otro Banco...</option>
+                        <option value="0102 - Banco de Venezuela (BDV)">0102 - Banco de Venezuela (BDV)</option>
+                        <option value="0104 - Banco Venezolano de Crédito">0104 - Banco Venezolano de Crédito</option>
+                        <option value="0105 - Banco Mercantil">0105 - Banco Mercantil</option>
+                        <option value="0108 - Banco Provincial">0108 - Banco Provincial</option>
+                        <option value="0114 - Bancaribe">0114 - Bancaribe</option>
+                        <option value="0115 - Banco Exterior">0115 - Banco Exterior</option>
+                        <option value="0128 - Banco Caroní">0128 - Banco Caroní</option>
+                        <option value="0134 - Banesco">0134 - Banesco</option>
+                        <option value="0138 - Banco Plaza">0138 - Banco Plaza</option>
+                        <option value="0151 - BFC Banco Fondo Común">0151 - BFC Banco Fondo Común</option>
+                        <option value="0156 - 100% Banco">0156 - 100% Banco</option>
+                        <option value="0157 - Banco del Sur">0157 - Banco del Sur</option>
+                        <option value="0163 - Banco del Tesoro">0163 - Banco del Tesoro</option>
+                        <option value="0166 - Banco Agrícola de Venezuela">0166 - Banco Agrícola de Venezuela</option>
+                        <option value="0168 - Bancrecer">0168 - Bancrecer</option>
+                        <option value="0169 - Mi Banco">0169 - Mi Banco</option>
+                        <option value="0171 - Banco Activo">0171 - Banco Activo</option>
+                        <option value="0172 - Bancamiga">0172 - Bancamiga</option>
+                        <option value="0174 - Banplus">0174 - Banplus</option>
+                        <option value="0175 - Banco Bicentenario">0175 - Banco Bicentenario</option>
+                        <option value="0177 - BANFANB">0177 - BANFANB</option>
+                        <option value="0191 - Banco Nacional de Crédito (BNC)">0191 - Banco Nacional de Crédito (BNC)</option>
                     </select>
                 </div>
 
